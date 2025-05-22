@@ -355,11 +355,6 @@ namespace dxvk {
       // spec-constantly chose the sampler type
       // automagically.
       { "d3d9.forceSamplerTypeSpecConstants", "True" },
-      { "rtx.lightmapTextures",  "211F65249E6D4837, 60CD2BCF8482B187,992CC729B6D67939,9994DEAFA52F35CD,A0068A9A5106777A,AE968ECEAC209AFF,CE59061AA5CCAE8B,DF6558A0EF71AC4B,E601679429E67BA3,EC2CC02D0C24CACE,FF3A56BDAA5FE64D" },
-      { "rtx.skyBoxTextures",    "" },
-      { "rtx.ignoreTextures",    "0" },
-      { "rtx.uiTextures",        "" },
-      { "rtx.useObsoleteHashOnTextureUpload", "True" },
     }} },
     /* Counter Strike: Global Offensive
        Needs NVAPI to avoid a forced AO + Smoke
