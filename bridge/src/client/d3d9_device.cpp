@@ -2403,7 +2403,7 @@ HRESULT Direct3DDevice9Ex_LSS<EnableSync>::ProcessVertices(UINT SrcStartIndex, U
   ZoneScoped;
   LogMissingFunctionCall();
 
-  if (pDestBuffer == nullptr || pVertexDecl == nullptr) {
+  if (pDestBuffer == nullptr) {
     return D3DERR_INVALIDCALL;
   }
 
