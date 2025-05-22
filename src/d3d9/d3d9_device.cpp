@@ -2851,8 +2851,17 @@ namespace dxvk {
     ScopedCpuProfileZone();
     D3D9DeviceLock lock = LockDevice();
 
-    if (unlikely(pDestBuffer == nullptr || pVertexDecl == nullptr))
+    if (unlikely(pDestBuffer == nullptr))
       return D3DERR_INVALIDCALL;
+
+    // When vertex shader 3.0 or above is set as the current vertex shader,
+    // the output vertex declaration must be present.
+    if (UseProgrammableVS()) {
+      const auto& programInfo = GetCommonShader(m_state.vertexShader)->GetInfo();
+
+      if (unlikely(programInfo.majorVersion() >= 3) && (pVertexDecl == nullptr))
+        return D3DERR_INVALIDCALL;
+    }
 
     if (!SupportsSWVP()) {
       static bool s_errorShown = false;
