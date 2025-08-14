@@ -118,7 +118,7 @@ public:
   GameCapturer(DxvkDevice* const pDevice, SceneManager& sceneManager, AssetExporter& exporter);
   ~GameCapturer();
 
-  void step(const Rc<DxvkContext> ctx, const float frameTimeMilliseconds, const HWND hwnd);
+  void step(const Rc<DxvkContext> ctx, const HWND hwnd);
   void triggerNewCapture() {
     m_bTriggerCapture = true;
   }
@@ -155,6 +155,8 @@ public:
   const CompletedCapture& queryCompleteCapture() const {
     return m_completeCapture;
   }
+
+  static std::string getCaptureInstanceStageNameWithTimestamp();
 
 private:
   GameCapturer() = delete;
@@ -294,7 +296,7 @@ private:
   static Options getOptions() {
     return { RtxOptions::captureShowMenuOnHotkey(),
              RtxOptions::getCaptureInstances(),
-             RtxOptions::captureInstanceStageName(),
+             getCaptureInstanceStageNameWithTimestamp(),
              RtxOptions::captureEnableMultiframe(),
              RtxOptions::captureMaxFrames(),
              RtxOptions::captureFramesPerSecond(),

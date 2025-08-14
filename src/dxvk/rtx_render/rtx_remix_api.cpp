@@ -45,6 +45,10 @@
 
 #include "../../d3d9/d3d9_swapchain.h"
 
+#include "../../lssusd/usd_include_begin.h"
+#include <src/usd-plugins/RemixParticleSystem/ParticleSystemAPI.h>
+#include "../../lssusd/usd_include_end.h"
+
 #include <windows.h>
 
 #include <optional>
@@ -129,6 +133,10 @@ namespace {
 
     Vector3 tovec3(const remixapi_Float3D& v) {
       return Vector3{ v.x, v.y, v.z };
+    }
+
+    Vector4 tovec4(const remixapi_Float4D& v) {
+      return Vector4 { v.x, v.y, v.z, v.w };
     }
 
     Vector3d tovec3d(const remixapi_Float3D& v) {
@@ -324,7 +332,6 @@ namespace {
           src.getWrapModeV()
         } };
       }
-      case MaterialDataType::Legacy:
       default: assert(0); return materialWithoutPreload;
       }
     }
@@ -419,7 +426,7 @@ namespace {
       }
 
       assert(0);
-      return MaterialData { LegacyMaterialData {} };
+      return MaterialData { OpaqueMaterialData {} };
     }
 
     // --
@@ -608,7 +615,65 @@ namespace {
       if (flags & REMIXAPI_INSTANCE_CATEGORY_BIT_THIRD_PERSON_PLAYER_BODY ){ result.set(InstanceCategories::ThirdPersonPlayerBody ); }
       if (flags & REMIXAPI_INSTANCE_CATEGORY_BIT_IGNORE_BAKED_LIGHTING    ){ result.set(InstanceCategories::IgnoreBakedLighting   ); }
       if (flags & REMIXAPI_INSTANCE_CATEGORY_BIT_IGNORE_TRANSPARENCY_LAYER){ result.set(InstanceCategories::IgnoreTransparencyLayer); }
+      if (flags & REMIXAPI_INSTANCE_CATEGORY_BIT_PARTICLE_EMITTER)         { result.set(InstanceCategories::ParticleEmitter); }
+      
+      static_assert((int)InstanceCategories::Count == 24, "Instance categories changed, please update Remix SDK");
       return result;
+    }
+
+    RtxParticleSystemDesc toRtParticleDesc(const remixapi_InstanceInfoParticleSystemEXT& info) {
+      RtxParticleSystemDesc desc {};
+
+      // Lifetimes
+      desc.minTtl = info.minTimeToLive;
+      desc.maxTtl = info.maxTimeToLive;
+
+      // Initial 
+      desc.spawnRate = info.spawnRatePerSecond;
+      desc.initialVelocityFromMotion = info.initialVelocityFromMotion;
+      desc.initialVelocityFromNormal = info.initialVelocityFromNormal;
+      desc.initialVelocityConeAngleDegrees = info.initialVelocityConeAngleDegrees;
+      desc.gravityForce = info.gravityForce;
+      desc.maxSpeed = info.maxSpeed;
+      desc.motionTrailMultiplier = info.motionTrailMultiplier;
+
+      // Turbulence
+      desc.turbulenceFrequency = info.turbulenceFrequency;
+      desc.turbulenceForce = info.turbulenceForce;
+
+      // Spawn
+      desc.minSpawnRotationSpeed = info.minSpawnRotationSpeed;
+      desc.maxSpawnRotationSpeed = info.maxSpawnRotationSpeed;
+      desc.minSpawnSize = info.minSpawnSize;
+      desc.maxSpawnSize = info.maxSpawnSize;
+      desc.minSpawnColor = tovec4(info.minSpawnColor);
+      desc.maxSpawnColor = tovec4(info.maxSpawnColor);
+
+      // Target
+      desc.minTargetRotationSpeed = info.minTargetRotationSpeed;
+      desc.maxTargetRotationSpeed = info.maxTargetRotationSpeed;
+      desc.minTargetSize = info.minTargetSize;
+      desc.maxTargetSize = info.maxTargetSize;
+      desc.minTargetColor = tovec4(info.minTargetColor);
+      desc.maxTargetColor = tovec4(info.maxTargetColor);
+
+      // Collision
+      desc.collisionThickness = info.collisionThickness;
+      desc.collisionRestitution = info.collisionRestitution;
+
+      // Counts/flags
+      desc.maxNumParticles = info.maxNumParticles;
+      desc.useTurbulence = static_cast<uint8_t>(info.useTurbulence);
+      desc.alignParticlesToVelocity = static_cast<uint8_t>(info.alignParticlesToVelocity);
+      desc.useSpawnTexcoords = static_cast<uint8_t>(info.useSpawnTexcoords);
+      desc.enableCollisionDetection = static_cast<uint8_t>(info.enableCollisionDetection);
+      desc.enableMotionTrail = static_cast<uint>(info.enableMotionTrail);
+      desc.hideEmitter = static_cast<uint>(info.hideEmitter);
+
+      // If this assert fails a new particle system parameter added, please update here.
+      assert(pxr::RemixParticleSystemAPI::GetSchemaAttributeNames(false).size() == 32);
+
+      return desc;
     }
 
     ExternalDrawState toRtDrawState(const remixapi_InstanceInfo& info) {
@@ -651,10 +716,7 @@ dxvk::ExternalDrawState dxvk::RemixAPIPrivateAccessor::toRtDrawState(const remix
     prototype.materialData.alphaTestEnabled = extBlend->alphaTestEnabled;
     prototype.materialData.alphaTestReferenceValue = extBlend->alphaTestReferenceValue;
     prototype.materialData.alphaTestCompareOp = (VkCompareOp) extBlend->alphaTestCompareOp;
-    prototype.materialData.alphaBlendEnabled = extBlend->alphaBlendEnabled;
-    prototype.materialData.srcColorBlendFactor = (VkBlendFactor) extBlend->srcColorBlendFactor;
-    prototype.materialData.dstColorBlendFactor = (VkBlendFactor) extBlend->dstColorBlendFactor;
-    prototype.materialData.colorBlendOp = (VkBlendOp) extBlend->colorBlendOp;
+    prototype.materialData.blendMode.enableBlending = extBlend->alphaBlendEnabled;
     prototype.materialData.textureColorOperation = (DxvkRtTextureOperation) extBlend->textureColorOperation;
     prototype.materialData.textureColorArg1Source = (RtTextureArgSource) extBlend->textureColorArg1Source;
     prototype.materialData.textureColorArg2Source = (RtTextureArgSource) extBlend->textureColorArg2Source;
@@ -663,6 +725,18 @@ dxvk::ExternalDrawState dxvk::RemixAPIPrivateAccessor::toRtDrawState(const remix
     prototype.materialData.textureAlphaArg2Source = (RtTextureArgSource) extBlend->textureAlphaArg2Source;
     prototype.materialData.tFactor = extBlend->tFactor;
     prototype.materialData.isTextureFactorBlend = extBlend->isTextureFactorBlend;
+    prototype.materialData.blendMode.colorSrcFactor = (VkBlendFactor) extBlend->srcColorBlendFactor;
+    prototype.materialData.blendMode.colorDstFactor = (VkBlendFactor) extBlend->dstColorBlendFactor;
+    prototype.materialData.blendMode.colorBlendOp = (VkBlendOp) extBlend->colorBlendOp;
+    prototype.materialData.blendMode.alphaSrcFactor = (VkBlendFactor) extBlend->srcAlphaBlendFactor;
+    prototype.materialData.blendMode.alphaDstFactor = (VkBlendFactor) extBlend->dstAlphaBlendFactor;
+    prototype.materialData.blendMode.alphaBlendOp = (VkBlendOp) extBlend->alphaBlendOp;
+    prototype.materialData.blendMode.writeMask = (VkColorComponentFlags) extBlend->writeMask;
+  }
+
+  std::optional<RtxParticleSystemDesc> optParticles;
+  if (auto extParticles = pnext::find<remixapi_InstanceInfoParticleSystemEXT>(&info)) {
+    optParticles.emplace(convert::toRtParticleDesc(*extParticles));
   }
 
   return ExternalDrawState {
@@ -670,7 +744,8 @@ dxvk::ExternalDrawState dxvk::RemixAPIPrivateAccessor::toRtDrawState(const remix
     info.mesh,
     convert::categoryToCameraType(info.categoryFlags),
     convert::toRtCategories(info.categoryFlags),
-    convert::tobool(info.doubleSided)
+    convert::tobool(info.doubleSided),
+    optParticles
   };
 }
 
@@ -1026,7 +1101,7 @@ namespace {
 
     dxvk::Config newSetting;
     newSetting.setOptionMove(std::move(strKey), std::string{ value });
-    found->second->readOption(newSetting, dxvk::RtxOptionImpl::ValueType::Value);
+    found->second->readOption(newSetting, dxvk::RtxOptionImpl::ValueType::PendingValue);
 
     return REMIXAPI_ERROR_CODE_SUCCESS;
   }
@@ -1226,41 +1301,52 @@ namespace {
       }
     }
 
-    dxvk::Resources& resourceManager = remixDevice->GetDXVKDevice()->getCommon()->getResources();
-    const dxvk::Resources::RaytracingOutput& rtOutput = resourceManager.getRaytracingOutput();
-
 #pragma warning(push)
 #pragma warning(error : 4061) // all switch cases must be handled explicitly
 
-    dxvk::Rc<dxvk::DxvkImage> srcImage = nullptr;
     switch (type) {
     case REMIXAPI_DXVK_COPY_RENDERING_OUTPUT_TYPE_FINAL_COLOR:
-      srcImage = rtOutput.m_finalOutput.resource(dxvk::Resources::AccessType::Read).image;
-      break;
     case REMIXAPI_DXVK_COPY_RENDERING_OUTPUT_TYPE_DEPTH:
-      srcImage = rtOutput.m_primaryDepth.image;
-      break;
     case REMIXAPI_DXVK_COPY_RENDERING_OUTPUT_TYPE_NORMALS:
-      srcImage = rtOutput.m_primaryWorldShadingNormal.image;
-      break;
     case REMIXAPI_DXVK_COPY_RENDERING_OUTPUT_TYPE_OBJECT_PICKING:
-      srcImage = rtOutput.m_primaryObjectPicking.image;
       break;
     default:
-      break;
-    }
-
-#pragma warning(pop)
-
-    if (srcImage.ptr() == nullptr) {
       return REMIXAPI_ERROR_CODE_INVALID_ARGUMENTS;
     }
 
     std::lock_guard lock { s_mutex };
-    remixDevice->EmitCs([cDest = destTexInfo->GetImage(), cSrc = srcImage](dxvk::DxvkContext* dxvkCtx) {
+    remixDevice->EmitCs([cDest = destTexInfo->GetImage(), type = type](dxvk::DxvkContext* dxvkCtx) {
       auto* ctx = static_cast<dxvk::RtxContext*>(dxvkCtx);
-      dxvk::RtxContext::blitImageHelper(ctx, cSrc, cDest, VkFilter::VK_FILTER_NEAREST);
+
+      dxvk::Resources& resourceManager = ctx->getCommonObjects()->getResources();
+      const dxvk::Resources::RaytracingOutput& rtOutput = resourceManager.getRaytracingOutput();
+
+      dxvk::Rc<dxvk::DxvkImage> srcImage = nullptr;
+      switch (type) {
+      case REMIXAPI_DXVK_COPY_RENDERING_OUTPUT_TYPE_FINAL_COLOR:
+        srcImage = rtOutput.m_finalOutput.resource(dxvk::Resources::AccessType::Read).image;
+        break;
+      case REMIXAPI_DXVK_COPY_RENDERING_OUTPUT_TYPE_DEPTH:
+        srcImage = rtOutput.m_primaryDepth.image;
+        break;
+      case REMIXAPI_DXVK_COPY_RENDERING_OUTPUT_TYPE_NORMALS:
+        srcImage = rtOutput.m_primaryWorldShadingNormal.image;
+        break;
+      case REMIXAPI_DXVK_COPY_RENDERING_OUTPUT_TYPE_OBJECT_PICKING:
+        srcImage = rtOutput.m_primaryObjectPicking.image;
+        break;
+      default:
+        assert(!"unexpected remixapi_dxvk_CopyRenderingOutputType value");
+        return;
+      }
+
+      if (srcImage.ptr()) {
+        dxvk::RtxContext::blitImageHelper(ctx, srcImage, cDest, VkFilter::VK_FILTER_NEAREST);
+      }
     });
+
+#pragma warning(pop)
+
     return REMIXAPI_ERROR_CODE_SUCCESS;
   }
 

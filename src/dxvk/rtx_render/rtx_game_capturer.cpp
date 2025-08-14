@@ -50,6 +50,8 @@
 #include "rtx_matrix_helpers.h"
 #include "rtx_lights.h"
 
+#include "../util/util_globaltime.h"
+
 #include <filesystem>
 
 #define BASE_DIR (util::RtxFileSys::path(util::RtxFileSys::Captures).string())
@@ -81,9 +83,13 @@ namespace dxvk {
       meta.alphaTestReferenceValue = rtInstance.surface.alphaState.alphaTestReferenceValue;
       meta.alphaTestCompareOp = (uint32_t) rtInstance.surface.alphaState.alphaTestType;
       meta.alphaBlendEnabled = !rtInstance.surface.alphaState.isBlendingDisabled;
-      meta.srcColorBlendFactor = (uint32_t) rtInstance.surface.srcColorBlendFactor;
-      meta.dstColorBlendFactor = (uint32_t) rtInstance.surface.dstColorBlendFactor;
-      meta.colorBlendOp = (uint32_t) rtInstance.surface.colorBlendOp;
+      meta.srcColorBlendFactor = (uint32_t) rtInstance.surface.blendModeState.colorSrcFactor;
+      meta.dstColorBlendFactor = (uint32_t) rtInstance.surface.blendModeState.colorDstFactor;
+      meta.colorBlendOp = (uint32_t) rtInstance.surface.blendModeState.colorBlendOp;
+      meta.srcAlphaBlendFactor = (uint32_t) rtInstance.surface.blendModeState.alphaSrcFactor;
+      meta.dstAlphaBlendFactor = (uint32_t) rtInstance.surface.blendModeState.alphaDstFactor;
+      meta.alphaBlendOp = (uint32_t) rtInstance.surface.blendModeState.alphaBlendOp;
+      meta.writeMask = (uint32_t) rtInstance.surface.blendModeState.writeMask;
       meta.textureColorArg1Source = (uint32_t) rtInstance.surface.textureColorArg1Source;
       meta.textureColorArg2Source = (uint32_t) rtInstance.surface.textureColorArg2Source;
       meta.textureColorOperation = (uint32_t) rtInstance.surface.textureColorOperation;
@@ -126,13 +132,13 @@ namespace dxvk {
   GameCapturer::~GameCapturer() {
   }
 
-  void GameCapturer::step(const Rc<DxvkContext> ctx, const float frameTimeMilliseconds, const HWND hwnd) {
+  void GameCapturer::step(const Rc<DxvkContext> ctx, const HWND hwnd) {
     trigger(ctx);
     if(m_state.has<State::Initializing>()) {
       initCapture(ctx, hwnd);
     }
     if (m_state.has<State::Capturing>()) {
-      capture(ctx, frameTimeMilliseconds);
+      capture(ctx, GlobalTime::get().deltaTimeMs());
     }
     if (m_state.has<State::BeginExport>()) {
       exportUsd(ctx);
@@ -1104,5 +1110,33 @@ namespace dxvk {
     const auto pFlattenedStage = pStage->Export(flattenedStagePath, true);
     assert(pFlattenedStage);
     Logger::info("[GameCapturer][" + exportPrep.debugId + "] USD capture flattened.");
+  }
+
+  std::string GameCapturer::getCaptureInstanceStageNameWithTimestamp() {
+
+    const std::string& stageName = RtxOptions::captureInstanceStageName();
+    const auto timestampPos = stageName.find(RtxOptions::captureTimestampReplacement());
+    const auto usdExtPos =
+      stageName.find(lss::ext::usd, stageName.length() - lss::ext::usda.length() - 1);
+    std::string stageNameWithExt = stageName + ((usdExtPos == std::string::npos) ? lss::ext::usd : "");
+    
+    if (timestampPos == std::string::npos) {
+      return stageNameWithExt;
+    }
+    
+    const std::time_t curTime = std::time(nullptr);
+    std::tm locTime;
+    // The vanilla versions of localtime are not thread safe, see:
+    // https://en.cppreference.com/w/cpp/chrono/c/localtime
+    localtime_s(&locTime, &curTime);
+    static constexpr size_t kTimeStrLen = 19; // length of YYYY-MM-DD_HH-MM-SS
+    const auto putTime = std::put_time(&locTime, "%Y-%m-%d_%H-%M-%S");
+    
+    std::stringstream stageNameSS;
+    stageNameSS << stageNameWithExt.substr(0, timestampPos);
+    stageNameSS << putTime;
+    stageNameSS << stageNameWithExt.substr(timestampPos + RtxOptions::captureTimestampReplacement().length());
+
+    return stageNameSS.str();
   }
 }

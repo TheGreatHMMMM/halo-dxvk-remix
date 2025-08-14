@@ -31,6 +31,8 @@
 #include "../../dxso/dxso_util.h"
 #include "rtx_material_data.h"
 #include "../../lssusd/mdl_helpers.h"
+#include "rtx/pass/particles/particle_system_common.h"
+#include "dxvk_constant_state.h"
 
 namespace dxvk {
 // Surfaces
@@ -234,7 +236,7 @@ struct RtSurface {
 
     assert((static_cast<uint32_t>(textureColorOperation) & 0x7) == static_cast<uint32_t>(textureColorOperation));
     assert((static_cast<uint32_t>(textureAlphaOperation) & 0x7) == static_cast<uint32_t>(textureAlphaOperation));
-    assert(textureAlphaOperation != DxvkRtTextureOperation::Force_Modulate4x);
+    assert(textureAlphaOperation != DxvkRtTextureOperation::Force_Modulate2x);
 
     textureFlags |= ((static_cast<uint32_t>(textureColorArg1Source) & 0x3));
     textureFlags |= ((static_cast<uint32_t>(textureColorArg2Source) & 0x3) << 2);
@@ -314,6 +316,92 @@ struct RtSurface {
         && firstIndex == surface.firstIndex;
   }
 
+  void printDebugInfo(const char* name = "") const {
+#ifdef REMIX_DEVELOPMENT
+    Logger::warn(str::format(
+      "RtSurface ", name, "\n",
+      "  address: ", this, "\n",
+      "  surfaceMaterialIndex: ", surfaceMaterialIndex, "\n",
+      "  associatedGeometryHash: 0x", std::hex, associatedGeometryHash, std::dec, "\n",
+      "  objectPickingValue: ", objectPickingValue, "\n",
+      "  decalSortOrder: ", decalSortOrder));
+    
+    // Print buffer info
+    Logger::warn("=== Buffer Info ===");
+    Logger::warn(str::format(
+      "  positionBufferIndex: ", positionBufferIndex, "\n",
+      "  positionOffset: ", positionOffset, "\n",
+      "  positionStride: ", positionStride, "\n",
+      "  previousPositionBufferIndex: ", previousPositionBufferIndex, "\n",
+      "  normalBufferIndex: ", normalBufferIndex, "\n",
+      "  normalOffset: ", normalOffset, "\n",
+      "  normalStride: ", normalStride, "\n",
+      "  normalFormat: ", static_cast<int>(normalFormat), "\n",
+      "  texcoordBufferIndex: ", texcoordBufferIndex, "\n",
+      "  texcoordOffset: ", texcoordOffset, "\n",
+      "  texcoordStride: ", texcoordStride, "\n",
+      "  indexBufferIndex: ", indexBufferIndex, "\n",
+      "  firstIndex: ", firstIndex, "\n",
+      "  indexStride: ", indexStride, "\n",
+      "  color0BufferIndex: ", color0BufferIndex, "\n",
+      "  color0Offset: ", color0Offset, "\n",
+      "  color0Stride: ", color0Stride));
+    
+    // Print boolean flags
+    Logger::warn("=== Boolean Flags ===");
+    Logger::warn(str::format(
+      "  isEmissive: ", isEmissive, "\n",
+      "  isMatte: ", isMatte, "\n",
+      "  isStatic: ", isStatic, "\n",
+      "  hasMaterialChanged: ", hasMaterialChanged, "\n",
+      "  isAnimatedWater: ", isAnimatedWater, "\n",
+      "  isClipPlaneEnabled: ", isClipPlaneEnabled, "\n",
+      "  isTextureFactorBlend: ", isTextureFactorBlend, "\n",
+      "  isMotionBlurMaskOut: ", isMotionBlurMaskOut, "\n",
+      "  skipSurfaceInteractionSpritesheetAdjustment: ", skipSurfaceInteractionSpritesheetAdjustment, "\n",
+      "  isInsideFrustum: ", isInsideFrustum, "\n",
+      "  ignoreTransparencyLayer: ", ignoreTransparencyLayer));
+    
+    // Print alpha state
+    Logger::warn("=== Alpha State ===");
+    Logger::warn(str::format(
+      "  isBlendingDisabled: ", alphaState.isBlendingDisabled, "\n",
+      "  isFullyOpaque: ", alphaState.isFullyOpaque, "\n",
+      "  alphaTestType: ", static_cast<int>(alphaState.alphaTestType), "\n",
+      "  alphaTestReferenceValue: ", static_cast<int>(alphaState.alphaTestReferenceValue), "\n",
+      "  blendType: ", static_cast<int>(alphaState.blendType), "\n",
+      "  invertedBlend: ", alphaState.invertedBlend, "\n",
+      "  emissiveBlend: ", alphaState.emissiveBlend, "\n",
+      "  isParticle: ", alphaState.isParticle, "\n",
+      "  isDecal: ", alphaState.isDecal));
+    
+    // Print texture operations
+    Logger::warn("=== Texture Operations ===");
+    Logger::warn(str::format(
+      "  textureColorArg1Source: ", static_cast<int>(textureColorArg1Source), "\n",
+      "  textureColorArg2Source: ", static_cast<int>(textureColorArg2Source), "\n",
+      "  textureColorOperation: ", static_cast<int>(textureColorOperation), "\n",
+      "  textureAlphaArg1Source: ", static_cast<int>(textureAlphaArg1Source), "\n",
+      "  textureAlphaArg2Source: ", static_cast<int>(textureAlphaArg2Source), "\n",
+      "  textureAlphaOperation: ", static_cast<int>(textureAlphaOperation), "\n",
+      "  texgenMode: ", static_cast<int>(texgenMode), "\n",
+      "  tFactor: 0x", std::hex, tFactor, std::dec));
+    
+    // Print spritesheet info
+    Logger::warn("=== Spritesheet Info ===");
+    Logger::warn(str::format(
+      "  spriteSheetRows: ", static_cast<int>(spriteSheetRows), "\n",
+      "  spriteSheetCols: ", static_cast<int>(spriteSheetCols), "\n",
+      "  spriteSheetFPS: ", static_cast<int>(spriteSheetFPS)));
+    
+    // Print instance info
+    Logger::warn("=== Instance Info ===");
+    Logger::warn(str::format(
+      "  instancesToObject: ", (instancesToObject != nullptr ? "valid" : "null"), "\n",
+      "  surfaceIndexOfFirstInstance: ", surfaceIndexOfFirstInstance));
+#endif
+  }
+
   // Used for calculating hashes, keep the members padded and default initialized
   struct AlphaState {
     bool isBlendingDisabled = true;
@@ -328,9 +416,7 @@ struct RtSurface {
   } alphaState;
 
   // Original draw call state
-  VkBlendFactor srcColorBlendFactor = VkBlendFactor::VK_BLEND_FACTOR_ONE;
-  VkBlendFactor dstColorBlendFactor = VkBlendFactor::VK_BLEND_FACTOR_ZERO;
-  VkBlendOp colorBlendOp = VkBlendOp::VK_BLEND_OP_ADD;
+  DxvkBlendMode blendModeState;
 
   // Static validation to detect any changes that require an alignment re-check
   static_assert(sizeof(AlphaState) == 9);
@@ -1400,14 +1486,17 @@ private:
 };
 
 enum class MaterialDataType {
-  Legacy,
   Opaque,
   Translucent,
   RayPortal,
+  Count,
+  Invalid
 };
 
 // Note: For use with "Legacy" D3D9 material information
 struct LegacyMaterialData {
+  static OpaqueMaterialData createDefault();
+
   LegacyMaterialData()
   { }
 
@@ -1449,60 +1538,41 @@ struct LegacyMaterialData {
             (getColorTexture2().isValid() && !getColorTexture2().isImageEmpty()));
   }
 
-  operator OpaqueMaterialData() const {
-    OpaqueMaterialData opaqueMat;
-    opaqueMat.getAlbedoOpacityTexture() = getColorTexture();
-    opaqueMat.getFilterMode() = lss::Mdl::Filter::vkToMdl(getSampler()->info().magFilter);
-    opaqueMat.getWrapModeU() = lss::Mdl::WrapMode::vkToMdl(getSampler()->info().addressModeU);
-    opaqueMat.getWrapModeV() = lss::Mdl::WrapMode::vkToMdl(getSampler()->info().addressModeV);
-    return opaqueMat;
-  }
-
-  operator TranslucentMaterialData() const {
-    TranslucentMaterialData transluscentMat;
-    transluscentMat.getFilterMode() = lss::Mdl::Filter::vkToMdl(getSampler()->info().magFilter);
-    transluscentMat.getWrapModeU() = lss::Mdl::WrapMode::vkToMdl(getSampler()->info().addressModeU);
-    transluscentMat.getWrapModeV() = lss::Mdl::WrapMode::vkToMdl(getSampler()->info().addressModeV);
-    return transluscentMat;
-  }
-
-  operator RayPortalMaterialData() const {
-    RayPortalMaterialData portalMat;
-    portalMat.getMaskTexture() = getColorTexture();
-    portalMat.getMaskTexture2() = getColorTexture2();
-    portalMat.getFilterMode() = lss::Mdl::Filter::vkToMdl(getSampler()->info().magFilter);
-    portalMat.getWrapModeU() = lss::Mdl::WrapMode::vkToMdl(getSampler()->info().addressModeU);
-    portalMat.getWrapModeV() = lss::Mdl::WrapMode::vkToMdl(getSampler()->info().addressModeV);
-    return portalMat;
-  }
+  // A single place to define and handle conversions between legacy and raytraced materials
+  template<typename T>
+  T as() const;
 
   const void printDebugInfo(const char* name = "") const {
 #ifdef REMIX_DEVELOPMENT
     Logger::warn(str::format(
-      "LegacyMaterialData ", name,
-      " address: ", this,
-      " alphaTestEnabled: ", alphaTestEnabled,
-      " alphaTestReferenceValue: ", alphaTestReferenceValue,
-      " alphaTestCompareOp: ", alphaTestCompareOp,
-      " alphaBlendEnabled: ", alphaBlendEnabled,
-      " srcColorBlendFactor: ", srcColorBlendFactor,
-      " dstColorBlendFactor: ", dstColorBlendFactor,
-      " colorBlendOp: ", colorBlendOp,
-      // " textureColorArg1Source: ", textureColorArg1Source,
-      // " textureColorArg2Source: ", textureColorArg2Source,
-      // " textureColorOperation: ", textureColorOperation,
-      // " textureAlphaArg1Source: ", textureAlphaArg1Source,
-      // " textureAlphaArg2Source: ", textureAlphaArg2Source,
-      // " textureAlphaOperation: ", textureAlphaOperation,
-      " tFactor: ", tFactor,
-      // " m_d3dMaterial.Diffuse: ", m_d3dMaterial.Diffuse,
-      // " m_d3dMaterial.Ambient: ", m_d3dMaterial.Ambient,
-      // " m_d3dMaterial.Specular: ", m_d3dMaterial.Specular,
-      // " m_d3dMaterial.Emissive: ", m_d3dMaterial.Emissive,
-      // " m_d3dMaterial.Power: ", m_d3dMaterial.Power,
-      std::hex, " m_colorTexture: 0x", colorTextures[0].getImageHash(),
-      " m_colorTexture2: 0x", colorTextures[1].getImageHash(),
-      " m_cachedHash: 0x", m_cachedHash, std::dec));
+      "LegacyMaterialData ", name, "\n",
+      "  address: ", this, "\n",
+      "  alphaTestEnabled: ", alphaTestEnabled, "\n",
+      "  alphaTestReferenceValue: ", alphaTestReferenceValue, "\n",
+      "  alphaTestCompareOp: ", alphaTestCompareOp, "\n",
+      "  alphaBlendEnabled: ", blendMode.enableBlending, "\n",
+      "  colorSrcFactor: ", blendMode.colorSrcFactor, "\n",
+      "  colorDstFactor: ", blendMode.colorDstFactor, "\n",
+      "  colorBlendOp: ", blendMode.colorBlendOp, "\n",
+      "  alphaSrcFactor: ", blendMode.alphaSrcFactor, "\n",
+      "  alphaDstFactor: ", blendMode.alphaDstFactor, "\n",
+      "  alphaBlendOp: ", blendMode.alphaBlendOp, "\n",
+      "  writeMask: ", blendMode.writeMask, "\n",
+      "  textureColorArg1Source: ", static_cast<int>(textureColorArg1Source), "\n",
+      "  textureColorArg2Source: ", static_cast<int>(textureColorArg2Source), "\n",
+      "  textureColorOperation: ", static_cast<int>(textureColorOperation), "\n",
+      "  textureAlphaArg1Source: ", static_cast<int>(textureAlphaArg1Source), "\n",
+      "  textureAlphaArg2Source: ", static_cast<int>(textureAlphaArg2Source), "\n",
+      "  textureAlphaOperation: ", static_cast<int>(textureAlphaOperation), "\n",
+      "  tFactor: ", tFactor, "\n",
+      // "  m_d3dMaterial.Diffuse: ", m_d3dMaterial.Diffuse, "\n",
+      // "  m_d3dMaterial.Ambient: ", m_d3dMaterial.Ambient, "\n",
+      // "  m_d3dMaterial.Specular: ", m_d3dMaterial.Specular, "\n",
+      // "  m_d3dMaterial.Emissive: ", m_d3dMaterial.Emissive, "\n",
+      // "  m_d3dMaterial.Power: ", m_d3dMaterial.Power, "\n",
+      std::hex, "  m_colorTexture: 0x", colorTextures[0].getImageHash(), "\n",
+      "  m_colorTexture2: 0x", colorTextures[1].getImageHash(), "\n",
+      "  m_cachedHash: 0x", m_cachedHash, std::dec));
 #endif
   }
 
@@ -1513,10 +1583,9 @@ struct LegacyMaterialData {
   bool alphaTestEnabled = false;
   uint8_t alphaTestReferenceValue = 0;
   VkCompareOp alphaTestCompareOp = VkCompareOp::VK_COMPARE_OP_ALWAYS;
-  bool alphaBlendEnabled = false;
-  VkBlendFactor srcColorBlendFactor = VkBlendFactor::VK_BLEND_FACTOR_ONE;
-  VkBlendFactor dstColorBlendFactor = VkBlendFactor::VK_BLEND_FACTOR_ZERO;
-  VkBlendOp colorBlendOp = VkBlendOp::VK_BLEND_OP_ADD;
+
+  DxvkBlendMode blendMode;
+
   RtTextureArgSource diffuseColorSource= RtTextureArgSource::None;
   RtTextureArgSource specularColorSource = RtTextureArgSource::None;
   RtTextureArgSource textureColorArg1Source = RtTextureArgSource::Texture;
@@ -1558,164 +1627,117 @@ private:
 };
 
 struct MaterialData {
-  MaterialData(const LegacyMaterialData& legacyMaterialData) :
-    m_type{ MaterialDataType::Legacy },
-    m_legacyMaterialData{ legacyMaterialData } {}
+  bool m_ignored = false;
 
-  MaterialData(const OpaqueMaterialData& opaqueMaterialData, bool ignored = false) :
-    m_ignored {ignored},
-    m_type{ MaterialDataType::Opaque},
-    m_opaqueMaterialData{ opaqueMaterialData } {}
+  using MaterialVariant = std::variant<
+    OpaqueMaterialData,
+    TranslucentMaterialData,
+    RayPortalMaterialData
+  >;
 
-  MaterialData(const TranslucentMaterialData& translucentMaterialData, bool ignored = false) :
-    m_ignored {ignored},
-    m_type{ MaterialDataType::Translucent },
-    m_translucentMaterialData{ translucentMaterialData }{}
+  // Using variants rather than a union here, due to the MaterialData containing nested members of Rc pointers.
+  MaterialVariant m_data;
 
-  MaterialData(const RayPortalMaterialData& rayPortalMaterialData) :
-    m_type{ MaterialDataType::RayPortal },
-    m_rayPortalMaterialData{ rayPortalMaterialData } {}
+  std::optional<RtxParticleSystemDesc> m_particleSystem;
 
-  MaterialData(const MaterialData& materialData) :
-    m_type { materialData.m_type }, m_ignored { materialData.m_ignored } {
-    switch (m_type) {
-    default:
-      assert(false);
+  // Verify that the variant and enum stay in sync
+  static_assert(std::variant_size_v<MaterialVariant> == (size_t)MaterialDataType::Count, "Enum is out of sync, please check your change.");
+  static_assert(std::is_same_v<std::variant_alternative_t<(size_t)MaterialDataType::Opaque,      MaterialVariant>, OpaqueMaterialData>,      "MaterialVariant[Opaque] must be OpaqueMaterialData, please check your change.");
+  static_assert(std::is_same_v<std::variant_alternative_t<(size_t)MaterialDataType::Translucent, MaterialVariant>, TranslucentMaterialData>, "MaterialVariant[Translucent] must be TranslucentMaterialData, please check your change.");
+  static_assert(std::is_same_v<std::variant_alternative_t<(size_t)MaterialDataType::RayPortal,   MaterialVariant>, RayPortalMaterialData>,   "MaterialVariant[RayPortal] must be RayPortalMaterialData, please check your change.");
 
-      [[fallthrough]];
-    case MaterialDataType::Legacy:
-      new (&m_legacyMaterialData) LegacyMaterialData{ materialData.m_legacyMaterialData };
-      break;
-    case MaterialDataType::Opaque:
-      new (&m_opaqueMaterialData) OpaqueMaterialData{ materialData.m_opaqueMaterialData };
-      break;
-    case MaterialDataType::Translucent:
-      new (&m_translucentMaterialData) TranslucentMaterialData{ materialData.m_translucentMaterialData };
-      break;
-    case MaterialDataType::RayPortal:
-      new (&m_rayPortalMaterialData) RayPortalMaterialData{ materialData.m_rayPortalMaterialData };
-      break;
-    }
-  }
+  MaterialData(const OpaqueMaterialData& opaque, std::optional<RtxParticleSystemDesc> particleSystem = std::nullopt, bool ignored = false)
+    : m_ignored { ignored }, m_data { opaque }, m_particleSystem { particleSystem } {}
 
-  ~MaterialData() {
-    switch (m_type) {
-    default:
-      assert(false);
+  MaterialData(const TranslucentMaterialData& translucent, std::optional<RtxParticleSystemDesc> particleSystem = std::nullopt, bool ignored = false)
+    : m_ignored { ignored }, m_data { translucent }, m_particleSystem { particleSystem } {}
 
-      [[fallthrough]];
-    case MaterialDataType::Legacy:
-      m_legacyMaterialData.~LegacyMaterialData();
-      break;
-    case MaterialDataType::Opaque:
-      m_opaqueMaterialData.~OpaqueMaterialData();
-      break;
-    case MaterialDataType::Translucent:
-      m_translucentMaterialData.~TranslucentMaterialData();
-      break;
-    case MaterialDataType::RayPortal:
-      m_rayPortalMaterialData.~RayPortalMaterialData();
-      break;
-    }
-  }
+  MaterialData(const RayPortalMaterialData& portal, std::optional<RtxParticleSystemDesc> particleSystem = std::nullopt)
+    : m_data { portal }, m_particleSystem { particleSystem } { }
 
-  MaterialData& operator=(const MaterialData& materialData) {
-    if (this != &materialData) {
-      m_type = materialData.m_type;
-
-      switch (materialData.m_type) {
-      default:
-        assert(false);
-
-        [[fallthrough]];
-      case MaterialDataType::Legacy:
-        m_legacyMaterialData = materialData.m_legacyMaterialData;
-        break;
-      case MaterialDataType::Opaque:
-        m_opaqueMaterialData = materialData.m_opaqueMaterialData;
-        break;
-      case MaterialDataType::Translucent:
-        m_translucentMaterialData = materialData.m_translucentMaterialData;
-        break;
-      case MaterialDataType::RayPortal:
-        m_rayPortalMaterialData = materialData.m_rayPortalMaterialData;
-        break;
-      }
-    }
-
-    return *this;
-  }
-
-  const bool getIgnored() const {
+  bool getIgnored() const {
     return m_ignored;
   }
 
-  const XXH64_hash_t getHash() const {
-    switch (m_type) {
-    default:
-      assert(false);
-
-      [[fallthrough]];
-    case MaterialDataType::Legacy:
-      return m_legacyMaterialData.getHash();
-    case MaterialDataType::Opaque:
-      return m_opaqueMaterialData.getHash();
-    case MaterialDataType::Translucent:
-      return m_translucentMaterialData.getHash();
-    case MaterialDataType::RayPortal:
-      return m_rayPortalMaterialData.getHash();
-    }
-  }
-
   MaterialDataType getType() const {
-    return m_type;
+    // NOTE: relies on the variant index matching MaterialDataType
+    return static_cast<MaterialDataType>(m_data.index());
   }
 
-  const LegacyMaterialData& getLegacyMaterialData() const {
-    assert(m_type == MaterialDataType::Legacy);
+  XXH64_hash_t getHash() const {
+    return std::visit([](auto const& mat) { return mat.getHash(); }, m_data);
+  }
 
-    return m_legacyMaterialData;
+  const Rc<DxvkSampler>& getSamplerOverride() const {
+    return std::visit([](auto const& mat) -> const Rc<DxvkSampler>& { return mat.getSamplerOverride(); }, m_data);
   }
 
   const OpaqueMaterialData& getOpaqueMaterialData() const {
-    assert(m_type == MaterialDataType::Opaque);
-
-    return m_opaqueMaterialData;
+    assert(std::holds_alternative<OpaqueMaterialData>(m_data));
+    return std::get<OpaqueMaterialData>(m_data);
   }
 
   OpaqueMaterialData& getOpaqueMaterialData() {
-    assert(m_type == MaterialDataType::Opaque);
-
-    return m_opaqueMaterialData;
+    assert(std::holds_alternative<OpaqueMaterialData>(m_data));
+    return std::get<OpaqueMaterialData>(m_data);
   }
 
   const TranslucentMaterialData& getTranslucentMaterialData() const {
-    assert(m_type == MaterialDataType::Translucent);
+    assert(std::holds_alternative<TranslucentMaterialData>(m_data));
+    return std::get<TranslucentMaterialData>(m_data);
+  }
 
-    return m_translucentMaterialData;
+  TranslucentMaterialData& getTranslucentMaterialData() {
+    assert(std::holds_alternative<TranslucentMaterialData>(m_data));
+    return std::get<TranslucentMaterialData>(m_data);
   }
 
   const RayPortalMaterialData& getRayPortalMaterialData() const {
-    assert(m_type == MaterialDataType::RayPortal);
-
-    return m_rayPortalMaterialData;
+    assert(std::holds_alternative<RayPortalMaterialData>(m_data));
+    return std::get<RayPortalMaterialData>(m_data);
   }
 
+  RayPortalMaterialData& getRayPortalMaterialData() {
+    assert(std::holds_alternative<RayPortalMaterialData>(m_data));
+    return std::get<RayPortalMaterialData>(m_data);
+  }
+
+  const RtxParticleSystemDesc* getParticleSystemDesc() const {
+    return m_particleSystem.has_value() ? &m_particleSystem.value() : nullptr;
+  }
+  
   void mergeLegacyMaterial(const LegacyMaterialData& input) {
-    switch (m_type) {
-    default:
-      assert(false);
-      [[fallthrough]];
-    case MaterialDataType::Opaque:
-      m_opaqueMaterialData.merge(input);
-      break;
-    case MaterialDataType::Translucent:
-      m_translucentMaterialData.merge(input);
-      break;
-    case MaterialDataType::RayPortal:
-      m_rayPortalMaterialData.merge(input);
-      break;
-    }
+    std::visit([&](auto& mat) {
+      using T = std::decay_t<decltype(mat)>;
+      if constexpr (std::is_same_v<T, OpaqueMaterialData>) {
+        OpaqueMaterialData tmp;
+        tmp.getAlbedoOpacityTexture() = input.getColorTexture();
+        if (auto s = input.getSampler().ptr()) {
+          tmp.getFilterMode() = lss::Mdl::Filter::vkToMdl(s->info().magFilter);
+          tmp.getWrapModeU() = lss::Mdl::WrapMode::vkToMdl(s->info().addressModeU);
+          tmp.getWrapModeV() = lss::Mdl::WrapMode::vkToMdl(s->info().addressModeV);
+        }
+        mat.merge(tmp);
+      } else if constexpr (std::is_same_v<T, TranslucentMaterialData>) {
+        TranslucentMaterialData tmp;
+        if (auto s = input.getSampler().ptr()) {
+          tmp.getFilterMode() = lss::Mdl::Filter::vkToMdl(s->info().magFilter);
+          tmp.getWrapModeU() = lss::Mdl::WrapMode::vkToMdl(s->info().addressModeU);
+          tmp.getWrapModeV() = lss::Mdl::WrapMode::vkToMdl(s->info().addressModeV);
+        }
+        mat.merge(tmp);
+      } else { 
+        RayPortalMaterialData tmp;
+        tmp.getMaskTexture() = input.getColorTexture();
+        tmp.getMaskTexture2() = input.getColorTexture2();
+        if (auto s = input.getSampler().ptr()) {
+          tmp.getFilterMode() = lss::Mdl::Filter::vkToMdl(s->info().magFilter);
+          tmp.getWrapModeU() = lss::Mdl::WrapMode::vkToMdl(s->info().addressModeU);
+          tmp.getWrapModeV() = lss::Mdl::WrapMode::vkToMdl(s->info().addressModeV);
+        }
+        mat.merge(tmp);
+      }
+    }, m_data);
   }
 
 #define POPULATE_SAMPLER_INFO(info, material) \
@@ -1728,35 +1750,10 @@ struct MaterialData {
   info.addressModeV = \
     lss::Mdl::WrapMode::mdlToVk(material.getWrapModeV(), &info.borderColor);
 
-  const void populateSamplerInfo(DxvkSamplerCreateInfo& toPopulate) const {
-    switch (m_type) {
-    default:
-      assert(false);
-      [[fallthrough]];
-    case MaterialDataType::Opaque:
-      POPULATE_SAMPLER_INFO(toPopulate, m_opaqueMaterialData);
-      break;
-    case MaterialDataType::Translucent:
-      POPULATE_SAMPLER_INFO(toPopulate, m_translucentMaterialData);
-      break;
-    case MaterialDataType::RayPortal:
-      POPULATE_SAMPLER_INFO(toPopulate, m_rayPortalMaterialData);
-      break;
-    }
+  void populateSamplerInfo(DxvkSamplerCreateInfo& toPopulate) const {
+    std::visit([&](auto const& mat) { POPULATE_SAMPLER_INFO(toPopulate, mat); }, m_data);
   }
-#undef P_SAMPLER_INFO
-
-private:
-  // Type-specific Material Data Information
-  bool m_ignored = false;
-
-  MaterialDataType m_type;
-  union {
-    LegacyMaterialData m_legacyMaterialData;
-    OpaqueMaterialData m_opaqueMaterialData;
-    TranslucentMaterialData m_translucentMaterialData;
-    RayPortalMaterialData m_rayPortalMaterialData;
-  };
+#undef POPULATE_SAMPLER_INFO
 };
 
 } // namespace dxvk

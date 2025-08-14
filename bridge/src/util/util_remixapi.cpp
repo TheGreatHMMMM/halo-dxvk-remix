@@ -498,7 +498,11 @@ void InstanceInfoObjectPicking::_dtor() {
                               textureAlphaArg2Source, \
                               textureAlphaOperation, \
                               tFactor, \
-                              isTextureFactorBlend
+                              isTextureFactorBlend, \
+                              srcAlphaBlendFactor, \
+                              dstAlphaBlendFactor, \
+                              alphaBlendOp, \
+                              writeMask
 uint32_t InstanceInfoBlend::_calcSize() const {
   return fold_helper::calcSize(InstanceInfoBlendVars);
 }
@@ -511,6 +515,52 @@ void InstanceInfoBlend::_deserialize(void*& pDeserialize) {
 }
 void InstanceInfoBlend::_dtor() {
 }
+
+
+#define InstanceInfoParticleSystemVars sType, \
+                                       maxNumParticles, \
+                                       useTurbulence, \
+                                       alignParticlesToVelocity, \
+                                       useSpawnTexcoords, \
+                                       enableCollisionDetection, \
+                                       enableMotionTrail, \
+                                       hideEmitter, \
+                                       minSpawnColor, \
+                                       maxSpawnColor, \
+                                       minTimeToLive, \
+                                       maxTimeToLive, \
+                                       initialVelocityFromMotion, \
+                                       initialVelocityFromNormal, \
+                                       initialVelocityConeAngleDegrees, \
+                                       minSpawnSize, \
+                                       maxSpawnSize, \
+                                       gravityForce, \
+                                       maxSpeed, \
+                                       turbulenceFrequency, \
+                                       turbulenceForce, \
+                                       minSpawnRotationSpeed, \
+                                       maxSpawnRotationSpeed, \
+                                       spawnRatePerSecond, \
+                                       collisionThickness, \
+                                       collisionRestitution, \
+                                       motionTrailMultiplier, \
+                                       minTargetSize, \
+                                       maxTargetSize, \
+                                       minTargetRotationSpeed, \
+                                       maxTargetRotationSpeed, \
+                                       minTargetColor, \
+                                       maxTargetColor 
+uint32_t InstanceInfoParticleSystem::_calcSize() const {
+  return fold_helper::calcSize(InstanceInfoParticleSystemVars);
+}
+void InstanceInfoParticleSystem::_serialize(void*& pSerialize) const {
+  fold_helper::serialize(pSerialize, InstanceInfoParticleSystemVars);
+}
+void InstanceInfoParticleSystem::_deserialize(void*& pDeserialize) {
+  pNext = nullptr;
+  fold_helper::deserialize(pDeserialize, InstanceInfoParticleSystemVars);
+}
+void InstanceInfoParticleSystem::_dtor() { }
 
 
 uint32_t InstanceInfoTransforms::_calcSize() const {

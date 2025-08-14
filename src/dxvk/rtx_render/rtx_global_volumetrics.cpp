@@ -188,11 +188,11 @@ namespace dxvk {
     RTX_OPTION_CLAMP_MIN(transmittanceMeasurementDistanceMeters, 0.0f);
     RTX_OPTION_CLAMP(anisotropy, -1.0f, 1.0f);
 
-    transmittanceColor.set(Vector3(
+    transmittanceColor.setDeferred(Vector3(
       std::clamp(transmittanceColor().x, 0.0f, 1.0f),
       std::clamp(transmittanceColor().y, 0.0f, 1.0f),
       std::clamp(transmittanceColor().z, 0.0f, 1.0f)));
-    singleScatteringAlbedo.set(Vector3(
+    singleScatteringAlbedo.setDeferred(Vector3(
       std::clamp(singleScatteringAlbedo().x, 0.0f, 1.0f),
       std::clamp(singleScatteringAlbedo().y, 0.0f, 1.0f),
       std::clamp(singleScatteringAlbedo().z, 0.0f, 1.0f)));
@@ -212,10 +212,10 @@ namespace dxvk {
     RTX_OPTION_CLAMP_MIN(fogRemapTransmittanceMeasurementDistanceMaxMeters, 0.0f);
     RTX_OPTION_CLAMP_MIN(fogRemapColorMultiscatteringScale, 0.0f);
 
-    fogRemapMaxDistanceMinMeters.set(std::min(fogRemapMaxDistanceMinMeters(), fogRemapMaxDistanceMaxMeters()));
-    fogRemapMaxDistanceMaxMeters.set(std::max(fogRemapMaxDistanceMinMeters(), fogRemapMaxDistanceMaxMeters()));
-    fogRemapTransmittanceMeasurementDistanceMinMeters.set(std::min(fogRemapTransmittanceMeasurementDistanceMinMeters(), fogRemapTransmittanceMeasurementDistanceMaxMeters()));
-    fogRemapTransmittanceMeasurementDistanceMaxMeters.set(std::max(fogRemapTransmittanceMeasurementDistanceMinMeters(), fogRemapTransmittanceMeasurementDistanceMaxMeters()));
+    fogRemapMaxDistanceMinMeters.setDeferred(std::min(fogRemapMaxDistanceMinMeters(), fogRemapMaxDistanceMaxMeters()));
+    fogRemapMaxDistanceMaxMeters.setDeferred(std::max(fogRemapMaxDistanceMinMeters(), fogRemapMaxDistanceMaxMeters()));
+    fogRemapTransmittanceMeasurementDistanceMinMeters.setDeferred(std::min(fogRemapTransmittanceMeasurementDistanceMinMeters(), fogRemapTransmittanceMeasurementDistanceMaxMeters()));
+    fogRemapTransmittanceMeasurementDistanceMaxMeters.setDeferred(std::max(fogRemapTransmittanceMeasurementDistanceMinMeters(), fogRemapTransmittanceMeasurementDistanceMaxMeters()));
   }
 
   // Quality level presets, x component controls the froxelGridResolutionScale and the y component controls the froxelDepthSlices settings.
@@ -239,29 +239,37 @@ namespace dxvk {
     int2(8,  48)
   };
 
+  void RtxGlobalVolumetrics::showPresetMenu() {
+    const char* volumericQualityLevelName[] = {
+      "Low",
+      "Medium",
+      "High",
+      "Ultra",
+      "Insane"
+    };
+    static_assert(sizeof(volumericQualityLevelName) / sizeof(volumericQualityLevelName[0]) == QualityLevel::QualityCount);
+
+    ImGui::Text("Set Quality Level Preset:");
+    for (uint32_t i = 0; i < QualityLevel::QualityCount; i++) {
+      if (ImGui::Button(volumericQualityLevelName[i])) {
+        setQualityLevel((QualityLevel) i);
+      }
+
+      if (i < QualityLevel::QualityCount - 1) {
+        ImGui::SameLine();
+      }
+    }
+  }
+
+  void RtxGlobalVolumetrics::showImguiUserSettings() {
+    showPresetMenu();
+  }
+
   void RtxGlobalVolumetrics::showImguiSettings() {
     if (ImGui::CollapsingHeader("Froxel Radiance Cache", ImGuiTreeNodeFlags_CollapsingHeader | ImGuiTreeNodeFlags_DefaultOpen)) {
       ImGui::Indent();
 
-      const char* volumericQualityLevelName[] = {
-        "Low",
-        "Medium",
-        "High",
-        "Ultra",
-        "Insane"
-      };
-      static_assert(sizeof(volumericQualityLevelName) / sizeof(volumericQualityLevelName[0]) == QualityLevel::QualityCount);
-
-      ImGui::Text("Set Quality Level Preset:");
-      for (uint32_t i = 0; i < QualityLevel::QualityCount; i++) {
-        if (ImGui::Button(volumericQualityLevelName[i])) {
-          setQualityLevel((QualityLevel) i);
-        }
-
-        if (i < QualityLevel::QualityCount - 1) {
-          ImGui::SameLine();
-        }
-      }
+      showPresetMenu();
 
       ImGui::Separator();
 
@@ -341,7 +349,7 @@ namespace dxvk {
         ImGui::ListBox("", &itemIndex, &volumericPresetName[0], (int) PresetType::PresetCount + 1, 3);
         ImGui::PopID();
         ImGui::PopItemWidth();
-        if (ImGui::Button("Apply") && indent > 0) {
+        if (ImGui::Button("Apply") && itemIndex > 0) {
           setPreset((PresetType) (itemIndex - 1));
           itemIndex = 0;
         }
@@ -440,21 +448,35 @@ namespace dxvk {
       qualityPreset = qualityModes[desiredQualityLevel];
     }
 
-    froxelGridResolutionScale.set(qualityPreset.x);
-    froxelDepthSlices.set(qualityPreset.y);
+    // Set new values based on preset values and cache old values
 
-    m_rebuildFroxels = true;
+    const auto newFroxelGridResolutionScale = qualityPreset.x;
+    const auto newFroxelDepthSlices = qualityPreset.y;
+    const auto oldFroxelGridResolutionScale = froxelGridResolutionScale();
+    const auto oldFroxelDepthSlices = froxelDepthSlices();
+
+    froxelGridResolutionScale.setDeferred(newFroxelGridResolutionScale);
+    froxelDepthSlices.setDeferred(newFroxelDepthSlices);
+
+    // Indicate that the froxel resources should be rebuilt if any relevant values changed
+
+    if (
+      newFroxelGridResolutionScale != oldFroxelGridResolutionScale ||
+      newFroxelDepthSlices != oldFroxelDepthSlices
+    ) {
+      m_rebuildFroxels = true;
+    }
   }
 
   void RtxGlobalVolumetrics::setPreset(const PresetType presetType) {
     const RtxGlobalVolumetrics::Preset& preset = Presets[presetType];
 
     // Set RTX options using the values from the preset
-    transmittanceColor.set(preset.transmittanceColor);
-    transmittanceMeasurementDistanceMeters.set(preset.transmittanceMeasurementDistance);
-    singleScatteringAlbedo.set(preset.singleScatteringAlbedo);
-    anisotropy.set(preset.anisotropy);
-    enableFogRemap.set(false);
+    transmittanceColor.setDeferred(preset.transmittanceColor);
+    transmittanceMeasurementDistanceMeters.setDeferred(preset.transmittanceMeasurementDistance);
+    singleScatteringAlbedo.setDeferred(preset.singleScatteringAlbedo);
+    anisotropy.setDeferred(preset.anisotropy);
+    enableFogRemap.setDeferred(false);
   }
 
   // This function checks the fog density to determine using physical fog or fix function fog.

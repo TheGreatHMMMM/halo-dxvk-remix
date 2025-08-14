@@ -48,6 +48,8 @@
 #include "rtx_bindless_resource_manager.h"
 #include "rtx_objectpicking.h"
 #include "rtx_mod_manager.h"
+#include "graph/rtx_graph_manager.h"
+#include "rtx_particle_system.h"
 #include <d3d9types.h>
 
 namespace dxvk 
@@ -106,6 +108,7 @@ struct ExternalDrawState {
   CameraType::Enum cameraType {};
   CategoryFlags categories {};
   bool doubleSided {};
+  const std::optional<RtxParticleSystemDesc> optionalParticleDesc {};
 };
 
 // Scene manager is a super manager, it's the interface between rendering and world state
@@ -131,9 +134,6 @@ public:
   bool areAllReplacementsLoaded() const;
   std::vector<Mod::State> getReplacementStates() const;
 
-  uint64_t getGameTimeSinceStartMS() const;
-  uint64_t getRealTimeSinceStartMS() const;
-
   RtxGlobals& getGlobals() { return m_globals; }
 
   Rc<DxvkBuffer> getSurfaceMaterialBuffer() { return m_surfaceMaterialBuffer; }
@@ -153,10 +153,12 @@ public:
   const InstanceManager& getInstanceManager() const { return m_instanceManager; }
   const AccelManager& getAccelManager() const { return m_accelManager; }
   const LightManager& getLightManager() const { return m_lightManager; }
+  const GraphManager& getGraphManager() const { return m_graphManager; }
   const RayPortalManager& getRayPortalManager() const { return m_rayPortalManager; }
   const BindlessResourceManager& getBindlessResourceManager() const { return m_bindlessResourceManager; }
   OpacityMicromapManager* getOpacityMicromapManager() const { return m_opacityMicromapManager.get(); }
   LightManager& getLightManager() { return m_lightManager; }
+  GraphManager& getGraphManager() { return m_graphManager; }
   std::unique_ptr<AssetReplacer>& getAssetReplacer() { return m_pReplacer; }
   TerrainBaker& getTerrainBaker() { return *m_terrainBaker.get(); }
 
@@ -190,7 +192,7 @@ public:
   // ISceneManager but not really
   void clear(Rc<DxvkContext> ctx, bool needWfi);
   void garbageCollection();
-  void prepareSceneData(Rc<RtxContext> ctx, class DxvkBarrierSet& execBarriers, const float frameTimeMilliseconds);
+  void prepareSceneData(Rc<RtxContext> ctx, class DxvkBarrierSet& execBarriers);
 
   void onFrameEnd(Rc<DxvkContext> ctx);
   void onFrameEndNoRTX();
@@ -221,6 +223,11 @@ public:
   void requestVramCompaction();
   void manageTextureVram();
 
+  bool isThinOpaqueMaterialExist() const { return m_thinOpaqueMaterialExist; }
+  bool isSssMaterialExist() const { return m_sssMaterialExist; }
+
+  bool isAntiCullingSupported() const { return m_isAntiCullingSupported; }
+
 private:
   enum class ObjectCacheState
   {
@@ -234,12 +241,15 @@ private:
   ObjectCacheState processGeometryInfo(Rc<DxvkContext> ctx, const DrawCallState& drawCallState, RaytraceGeometry& modifiedGeometryData);
 
   // Consumes a draw call state and updates the scene state accordingly
-  uint64_t processDrawCallState(Rc<DxvkContext> ctx, const DrawCallState& blasInput, const MaterialData* replacementMaterialData);
+  RtInstance* processDrawCallState(Rc<DxvkContext> ctx, 
+                                   const DrawCallState& blasInput, 
+                                   MaterialData& materialData, 
+                                   RtInstance* existingInstance = nullptr,
+                                   const RtxParticleSystemDesc* pParticleSystemDesc = nullptr);
 
-  const RtSurfaceMaterial& createSurfaceMaterial( Rc<DxvkContext> ctx, 
-                                                  const MaterialData& renderMaterialData,
-                                                  const DrawCallState& drawCallState,
-                                                  uint32_t* out_indexInCache = nullptr);
+  const RtSurfaceMaterial& createSurfaceMaterial(const MaterialData& renderMaterialData,
+                                                 const DrawCallState& drawCallState,
+                                                 uint32_t* out_indexInCache = nullptr);
 
   // Updates ref counts for new buffers
   void updateBufferCache(RaytraceGeometry& newGeoData);
@@ -254,14 +264,24 @@ private:
   // Called whenever a new instance has been added to the database
   void onInstanceAdded(RtInstance& instance);
   // Called whenever instance metadata is updated
-  void onInstanceUpdated(RtInstance& instance, const RtSurfaceMaterial& material, const bool hasTransformChanged, const bool hasVerticesdChanged);
+  void onInstanceUpdated(RtInstance& instance, const DrawCallState& drawCall, const MaterialData& material, const bool hasTransformChanged, const bool hasVerticesdChanged, const bool isFirstUpdateThisFrame);
   // Called whenever an instance has been removed from the database
   void onInstanceDestroyed(RtInstance& instance);
 
-  uint64_t drawReplacements(Rc<DxvkContext> ctx, const DrawCallState* input, const std::vector<AssetReplacement>* pReplacements, const MaterialData* overrideMaterialData);
+  // Called to destroy a ReplacementInstance.
+  // This is used to clear up all references to the ReplacementInstance.
+  // Also responsible for removing any graphs from graphManager.
+  void destroyReplacementInstance(ReplacementInstance* replacementInstance);
+
+  void drawReplacements(Rc<DxvkContext> ctx, const DrawCallState* input, const std::vector<AssetReplacement>* pReplacements, MaterialData& renderMaterialData);
 
   void createEffectLight(Rc<DxvkContext> ctx, const DrawCallState& input, const RtInstance* instance);
 
+  // Print all RtInstances for debugging
+  void printAllRtInstances();
+  
+  MaterialData determineMaterialData(const MaterialData* overrideMaterialData, const DrawCallState& input);
+  
   uint32_t m_beginUsdExportFrameNum = -1;
   bool m_enqueueDelayedClear = false;
   bool m_previousFrameSceneAvailable = false;
@@ -272,6 +292,7 @@ private:
   InstanceManager m_instanceManager;
   AccelManager m_accelManager;
   LightManager m_lightManager;
+  GraphManager m_graphManager;
   RayPortalManager m_rayPortalManager;
   BindlessResourceManager m_bindlessResourceManager;
   std::unique_ptr<OpacityMicromapManager> m_opacityMicromapManager;
@@ -294,9 +315,6 @@ private:
   Rc<DxvkBuffer> m_surfaceMaterialExtensionBuffer;
   Rc<DxvkBuffer> m_volumeMaterialBuffer;
 
-  uint32_t m_currentFrameIdx = -1;
-  bool m_useFixedFrameTime = false;
-  std::chrono::time_point<std::chrono::steady_clock> m_startTime;
   uint32_t m_activePOMCount = 0;
   
   float m_uniqueObjectSearchDistance = 1.f;
@@ -318,6 +336,11 @@ private:
 
   std::atomic_bool m_forceFreeTextureMemory = false;
   std::atomic_bool m_forceFreeUnusedDxvkAllocatorChunks = false;
+
+  bool m_thinOpaqueMaterialExist = false;
+  bool m_sssMaterialExist = false;
+
+  bool m_isAntiCullingSupported = true;
 };
 
 }  // namespace nvvk

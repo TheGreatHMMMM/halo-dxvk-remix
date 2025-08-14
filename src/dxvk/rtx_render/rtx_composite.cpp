@@ -33,6 +33,8 @@
 #include "rtx_restir_gi_rayquery.h"
 #include "rtx_debug_view.h"
 
+#include "../util/util_globaltime.h"
+
 #include <rtx_shaders/composite.h>
 #include <rtx_shaders/composite_alpha_blend.h>
 #include "rtx_texture_manager.h"
@@ -208,10 +210,10 @@ namespace dxvk {
     ImGui::Checkbox("Use Post Filter", &usePostFilterObject());
     ImGui::DragFloat("Post Filter Threshold", &postFilterThresholdObject(), 0.01f, 0.0f, 100.f, "%.2f", ImGuiSliderFlags_AlwaysClamp);
 
-    dlssEnhancementDirectLightPower.set(bsdfPowers[0]);
-    dlssEnhancementIndirectLightPower.set(bsdfPowers[1]);
-    dlssEnhancementDirectLightMaxValue.set(bsdfMaxValues[0]);
-    dlssEnhancementIndirectLightMaxValue.set(bsdfMaxValues[1]);
+    dlssEnhancementDirectLightPower.setDeferred(bsdfPowers[0]);
+    dlssEnhancementIndirectLightPower.setDeferred(bsdfPowers[1]);
+    dlssEnhancementDirectLightMaxValue.setDeferred(bsdfMaxValues[0]);
+    dlssEnhancementIndirectLightMaxValue.setDeferred(bsdfMaxValues[1]);
   }
 
   void CompositePass::createConstantsBuffer()
@@ -468,7 +470,7 @@ namespace dxvk {
     // at the 24 bit boundary (as we use a 8 bit scalar on top of this time which we want to fit into 32 bits without issues,
     // plus we also convert this value to a floating point value at some point as well which has 23 bits of precision).
     // Bitwise and used rather than modulus as well for slightly better performance.
-    compositeArgs.timeSinceStartMS = static_cast<uint32_t>(sceneManager.getGameTimeSinceStartMS()) & ((1U << 24U) - 1U);
+    compositeArgs.timeSinceStartMS = static_cast<uint32_t>(GlobalTime::get().absoluteTimeMs()) & ((1U << 24U) - 1U);
     
     RayPortalManager::SceneData portalData = sceneManager.getRayPortalManager().getRayPortalInfoSceneData();
     compositeArgs.numActiveRayPortals = portalData.numActiveRayPortals;

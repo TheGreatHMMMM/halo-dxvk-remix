@@ -110,7 +110,7 @@ namespace dxvk {
     };
     template<Tabs tab>
     void openTab() {
-      RtxOptions::showUI.set(UIType::Advanced);
+      RtxOptions::showUI.setDeferred(UIType::Advanced);
       triggerTab(tab);
     }
     template<Tabs tab>
@@ -228,8 +228,6 @@ namespace dxvk {
     void showVsyncOptions(bool enableDLFGGuard);
 
     void processHotkeys();
-
-    void sendUIActivationMessage();
 
     void showMemoryStats() const;
     bool showRayReconstructionEnable(bool supportsRR);

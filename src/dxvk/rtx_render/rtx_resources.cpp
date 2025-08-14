@@ -37,6 +37,7 @@
 #include "rtx_scene_manager.h"
 #include "rtx_texture_manager.h"
 #include "rtx_debug_view.h"
+#include "../util/util_globaltime.h"
 
 namespace dxvk {
 
@@ -156,6 +157,10 @@ namespace dxvk {
     m_sharedResource = new SharedResource(createImageResource(ctx, name, extent, format, numLayers, imageType, imageViewType, 
                                                               imageCreateFlags, extraUsageFlags, clearValue, mipLevels));
     m_view = m_sharedResource->resource.view;
+    
+    // Register that we are the owner, since the createImageResource call will perform a surface clear with `clearValue`.
+    registerAccess(AccessType::Write);
+
 #ifdef REMIX_DEVELOPMENT
     if (s_resourcesViewMap.find(m_view.ptr()) == s_resourcesViewMap.end()) {
       s_resourcesViewMap[m_view.ptr()] = std::string(name);
@@ -213,7 +218,8 @@ namespace dxvk {
   Resources::AliasedResource& Resources::AliasedResource::operator=(Resources::AliasedResource&& other) {
     if (this != &other) {
       m_device = other.m_device;
-      m_sharedResource = other.m_sharedResource;
+      const bool takeOwnershipAfterMove = other.ownsResource();
+      m_sharedResource = std::move(other.m_sharedResource);
 #ifdef REMIX_DEVELOPMENT
       s_resourcesViewMap.erase(m_view.ptr());
 #endif
@@ -222,6 +228,9 @@ namespace dxvk {
 #ifdef REMIX_DEVELOPMENT
       m_thisObjectAddress = std::make_shared<const AliasedResource*>(this);
       m_name = other.m_name;
+      if (takeOwnershipAfterMove) {
+        takeOwnership();
+      }
 #endif
     }
 
@@ -359,16 +368,16 @@ namespace dxvk {
   void Resources::onFrameBegin(
     Rc<DxvkContext> ctx,
     RtxTextureManager& textureManager,
+    const SceneManager& sceneManager,
     const VkExtent3D& downscaledExtent,
     const VkExtent3D& targetExtent,
-    float frameTimeMilliseconds,
     bool resetHistory,
     bool isCameraCut) {
 
     FrameBeginContext frameBeginCtx;
     frameBeginCtx.downscaledExtent = downscaledExtent;
     frameBeginCtx.targetExtent = targetExtent;
-    frameBeginCtx.frameTimeMilliseconds = frameTimeMilliseconds;
+    frameBeginCtx.frameTimeMilliseconds = GlobalTime::get().deltaTimeMs();
     frameBeginCtx.resetHistory = resetHistory;
     frameBeginCtx.isCameraCut = isCameraCut;
 
@@ -400,6 +409,7 @@ namespace dxvk {
 
     // Alias resources depends on RTX Denoising and GI Options
     // TODO: We should automatically assign available resources at run-time instead of manually figure it out.
+    //       There are numerous option combinations, which makes it easy to miss some. Review this part of the code if the AliasedResource WAR hazard is triggered.
     bool isConditionalAliasingsShareSameView = true;
     static bool cachedIsRayReconstructionEnabled = RtxOptions::isRayReconstructionEnabled();
     if (RtxOptions::isRayReconstructionEnabled()) {
@@ -408,7 +418,7 @@ namespace dxvk {
         m_raytracingOutput.m_primaryRtxdiTemporalPosition = AliasedResource(m_raytracingOutput.m_primaryVirtualWorldShadingNormalPerceptualRoughnessDenoising, ctx, m_downscaledExtent, VK_FORMAT_R32_UINT, "primary rtxdi temporal position", true);
       }
 
-      if (RtxOptions::integrateIndirectMode() == IntegrateIndirectMode::NeuralRadianceCache && DebugView::debugViewIdx() == DEBUG_VIEW_DISABLED) {
+      if (RtxOptions::integrateIndirectMode() == IntegrateIndirectMode::NeuralRadianceCache && RtxOptions::captureDebugImage() == false) {
         m_raytracingOutput.m_indirectRadianceHitDistance = AliasedResource(m_raytracingOutput.m_primaryVirtualMotionVector, ctx, m_downscaledExtent, VK_FORMAT_R16G16B16A16_SFLOAT, "Indirect Radiance Hit Distance", true);
 
         // m_primaryRtxdiTemporalPosition and m_primaryVirtualWorldShadingNormalPerceptualRoughnessDenoising has different format, so they have different image views
@@ -435,6 +445,22 @@ namespace dxvk {
       m_raytracingOutput.m_gbufferPSRData[0].sharesTheSameView(m_raytracingOutput.getCurrentPrimaryWorldPositionWorldTriangleNormal()) &&
       isConditionalAliasingsShareSameView &&
       "New view for an aliased resource was created on the fly. Avoid doing that or ensure it has no negative side effects.");
+
+    // Only create SSS Textures when there're SSS materials in the scene
+    {
+      if (sceneManager.isSssMaterialExist() || sceneManager.isThinOpaqueMaterialExist()) {
+        if (!m_raytracingOutput.m_sharedSubsurfaceData.isValid()) {
+          m_raytracingOutput.m_sharedSubsurfaceData = createImageResource(ctx, "primary subsurface material buffer", m_downscaledExtent, VK_FORMAT_R16G16_UINT);
+        }
+        if (!m_raytracingOutput.m_sharedSubsurfaceDiffusionProfileData.isValid()) {
+          // The single scattering is also stored in diffusion profile texture which is used in thin opaque. So we need to create this texture for thin opaque as well.
+          m_raytracingOutput.m_sharedSubsurfaceDiffusionProfileData = createImageResource(ctx, "primary subsurface material diffusion profile data buffer", m_downscaledExtent, VK_FORMAT_R32G32_UINT);
+        }
+      } else {
+        m_raytracingOutput.m_sharedSubsurfaceData.reset();
+        m_raytracingOutput.m_sharedSubsurfaceDiffusionProfileData.reset();
+      }
+    }
   }
 
   void Resources::onResize(Rc<DxvkContext> ctx, const VkExtent3D& downscaledExtent, const VkExtent3D& targetExtent) {
@@ -968,6 +994,7 @@ namespace dxvk {
     m_raytracingOutput.m_primaryHitDistance = createImageResource(ctx, "primary hit distance", m_downscaledExtent, VK_FORMAT_R32_SFLOAT);
     m_raytracingOutput.m_primaryViewDirection = createImageResource(ctx, "primary view direction", m_downscaledExtent, VK_FORMAT_R16G16_SNORM);
     m_raytracingOutput.m_primaryConeRadius = createImageResource(ctx, "primary cone radius", m_downscaledExtent, VK_FORMAT_R16_SFLOAT);
+
     m_raytracingOutput.m_primaryWorldPositionWorldTriangleNormal[0] = AliasedResource(ctx, m_downscaledExtent, VK_FORMAT_R32G32B32A32_SFLOAT, "primary world position world triangle normal 0");
     m_raytracingOutput.m_primaryWorldPositionWorldTriangleNormal[1] = AliasedResource(ctx, m_downscaledExtent, VK_FORMAT_R32G32B32A32_SFLOAT, "primary world position world triangle normal 1");
     m_raytracingOutput.m_primaryPositionError = createImageResource(ctx, "primary position error", m_downscaledExtent, VK_FORMAT_R32_SFLOAT);
@@ -978,9 +1005,6 @@ namespace dxvk {
     m_raytracingOutput.m_primarySurfaceFlags = createImageResource(ctx, "primary surface flags", m_downscaledExtent, VK_FORMAT_R8_UINT);
     m_raytracingOutput.m_primaryDisocclusionThresholdMix = createImageResource(ctx, "primary disocclusion threshold mix", m_downscaledExtent, VK_FORMAT_R16_SFLOAT);
     m_raytracingOutput.m_primaryDisocclusionMaskForRR = AliasedResource(m_raytracingOutput.m_sharedSurfaceIndex, ctx, m_downscaledExtent, VK_FORMAT_R16_SFLOAT, "primary disocclusion mask for ray reconstruction", allowCompatibleFormatAliasing);
-
-    m_raytracingOutput.m_sharedSubsurfaceData = createImageResource(ctx, "primary subsurface material buffer", m_downscaledExtent, VK_FORMAT_R16G16B16A16_UINT);
-    m_raytracingOutput.m_sharedSubsurfaceDiffusionProfileData = createImageResource(ctx, "primary subsurface material diffusion profile data buffer", m_downscaledExtent, VK_FORMAT_B10G11R11_UFLOAT_PACK32);
 
     if (m_raytracingOutput.m_primaryObjectPicking.isValid()) {
       m_raytracingOutput.m_primaryObjectPicking = createImageResource(ctx, "primary object picking", m_downscaledExtent, VK_FORMAT_R32_UINT);

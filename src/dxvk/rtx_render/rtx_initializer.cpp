@@ -68,7 +68,7 @@ namespace dxvk {
     } else {
       // Default, init to custom unless otherwise specified
       if (RtxOptions::graphicsPreset() == GraphicsPreset::Auto) {
-        RtxOptions::graphicsPreset.set(GraphicsPreset::Custom);
+        RtxOptions::graphicsPreset.setDeferred(GraphicsPreset::Custom);
       }
 
       // Need to initialize DLSS-RR settings in test cases.
@@ -82,6 +82,9 @@ namespace dxvk {
     ShaderManager::getInstance()->addGlobalExtraLayout(pCommon->getSceneManager().getBindlessResourceManager().getGlobalBindlessTableLayout(BindlessResourceManager::Buffers));
     ShaderManager::getInstance()->addGlobalExtraLayout(pCommon->getSceneManager().getBindlessResourceManager().getGlobalBindlessTableLayout(BindlessResourceManager::Textures));
     ShaderManager::getInstance()->addGlobalExtraLayout(pCommon->getSceneManager().getBindlessResourceManager().getGlobalBindlessTableLayout(BindlessResourceManager::Samplers));
+
+    // Need to promote all of the hardware support Options before prewarming shaders.
+    RtxOption<bool>::applyPendingValues();
 
     // Kick off shader prewarming
     startPrewarmShaders();

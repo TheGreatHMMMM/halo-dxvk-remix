@@ -74,6 +74,10 @@ namespace dxvk
     return Vector3{ getViewToWorld(freecam)[0].xyz() };
   }
 
+  Vector3 RtCamera::getPreviousPosition(bool freecam) const {
+    return Vector3 { getPreviousViewToWorld(freecam)[3].xyz() };
+  }
+
   std::pair<float, float> RtCamera::calculateNearFarPlanes() const {
     // Note: Converted to floats to interface with MathLib. Ideally this should be a double still.
     Matrix4 floatViewToProj{ getViewToProjection() };
@@ -430,16 +434,16 @@ namespace dxvk
           moveDownUp -= speed;
         }
         if (ImGUI::checkHotkeyState(RtxOptions::FreeCam::keyPitchDown(), true)) {
-          freeCameraPitch.set( freeCameraPitch() + coordSystemScale * pitchDirection * angularSpeed);
+          freeCameraPitch.setDeferred( freeCameraPitch() + coordSystemScale * pitchDirection * angularSpeed);
         }
         if (ImGUI::checkHotkeyState(RtxOptions::FreeCam::keyPitchUp(), true)) {
-          freeCameraPitch.set( freeCameraPitch() - coordSystemScale * pitchDirection * angularSpeed);
+          freeCameraPitch.setDeferred( freeCameraPitch() - coordSystemScale * pitchDirection * angularSpeed);
         }
         if (ImGUI::checkHotkeyState(RtxOptions::FreeCam::keyYawLeft(), true)) {
-          freeCameraYaw.set( freeCameraYaw() + coordSystemScale *  angularSpeed);
+          freeCameraYaw.setDeferred( freeCameraYaw() + coordSystemScale *  angularSpeed);
         }
         if (ImGUI::checkHotkeyState(RtxOptions::FreeCam::keyYawRight(), true)) {
-          freeCameraYaw.set( freeCameraYaw() - coordSystemScale * angularSpeed);
+          freeCameraYaw.setDeferred( freeCameraYaw() - coordSystemScale * angularSpeed);
         }
       }
 
@@ -448,8 +452,8 @@ namespace dxvk
       POINT p;
       if (GetCursorPos(&p)) {
         if (!lockFreeCamera() && ImGui::IsMouseDown(ImGuiMouseButton_Left) && ((m_mouseX != p.x) || (m_mouseY != p.y))) {
-          freeCameraYaw.set( freeCameraYaw() + coordSystemScale * (m_mouseX - p.x) * 0.1f * elapsedSec.count());
-          freeCameraPitch.set( freeCameraPitch() + coordSystemScale * pitchDirection * (m_mouseY - p.y) * 0.2f * elapsedSec.count());
+          freeCameraYaw.setDeferred( freeCameraYaw() + coordSystemScale * (m_mouseX - p.x) * 0.1f * elapsedSec.count());
+          freeCameraPitch.setDeferred( freeCameraPitch() + coordSystemScale * pitchDirection * (m_mouseY - p.y) * 0.2f * elapsedSec.count());
         }
 
         m_mouseX = p.x;
@@ -458,12 +462,12 @@ namespace dxvk
 
       // Reset
       if (ImGui::IsMouseDown(ImGuiMouseButton_Right)) {
-        freeCameraPosition.set(Vector3(0.f));
+        freeCameraPosition.setDeferred(Vector3(0.f));
         moveLeftRight = 0;
         moveBackForward = 0;
         moveDownUp = 0;
-        freeCameraYaw.set(0.0f);
-        freeCameraPitch.set(0.0f);
+        freeCameraYaw.setDeferred(0.0f);
+        freeCameraPitch.setDeferred(0.0f);
       }
     } else {
       // track mouse position when out of focus to avoid uncontrollable camera flips when we're back in focus
@@ -493,7 +497,7 @@ namespace dxvk
       freeCameraPos += moveLeftRight * Vector3(freeCamViewToWorld.data[0].xyz());
       freeCameraPos += upSign * moveDownUp * Vector3(freeCamViewToWorld.data[1].xyz());
       freeCameraPos -= moveBackForward * Vector3(freeCamViewToWorld.data[2].xyz());
-      freeCameraPosition.set(freeCameraPos);
+      freeCameraPosition.setDeferred(freeCameraPos);
       
       // save free camera context
       m_context.enableFreeCamera = enableFreeCamera();
@@ -559,13 +563,13 @@ namespace dxvk
 
 
   bool RtCamera::updateFromSetting(uint32_t frameIdx, const RtCameraSetting& setting, uint32_t flags) {
-    enableFreeCamera.set(setting.enableFreeCamera);
-    freeCameraPosition.set(setting.freeCameraPosition);
-    freeCameraYaw.set(setting.freeCameraYaw);
-    freeCameraPitch.set(setting.freeCameraPitch);
-    freeCameraViewRelative.set(setting.freeCameraViewRelative);
+    enableFreeCamera.setDeferred(setting.enableFreeCamera);
+    freeCameraPosition.setDeferred(setting.freeCameraPosition);
+    freeCameraYaw.setDeferred(setting.freeCameraYaw);
+    freeCameraPitch.setDeferred(setting.freeCameraPitch);
+    freeCameraViewRelative.setDeferred(setting.freeCameraViewRelative);
 
-    RtxOptions::shakeCamera.set(setting.isCameraShaking);
+    RtxOptions::shakeCamera.setDeferred(setting.isCameraShaking);
 
     m_context = setting;
 
@@ -925,17 +929,17 @@ namespace dxvk
       ImGui::Checkbox("View Relative", &freeCameraViewRelativeObject());
 
       if (ImGui::CollapsingHeader("Show Camera Controls", collapsingHeaderClosedFlags)) {
-        ImGui::Text("MoveFaster:");  ImGui::SameLine(150); ImGui::Text("%s", buildKeyBindDescriptorString(RtxOptions::FreeCam::keyMoveFaster()));
-        ImGui::Text("MoveForward:"); ImGui::SameLine(150); ImGui::Text("%s", buildKeyBindDescriptorString(RtxOptions::FreeCam::keyMoveForward()));
-        ImGui::Text("MoveLeft:");    ImGui::SameLine(150); ImGui::Text("%s", buildKeyBindDescriptorString(RtxOptions::FreeCam::keyMoveLeft()));
-        ImGui::Text("MoveBack:");    ImGui::SameLine(150); ImGui::Text("%s", buildKeyBindDescriptorString(RtxOptions::FreeCam::keyMoveBack()));
-        ImGui::Text("MoveRight:");   ImGui::SameLine(150); ImGui::Text("%s", buildKeyBindDescriptorString(RtxOptions::FreeCam::keyMoveRight()));
-        ImGui::Text("MoveUp:");      ImGui::SameLine(150); ImGui::Text("%s", buildKeyBindDescriptorString(RtxOptions::FreeCam::keyMoveUp()));
-        ImGui::Text("MoveDown:");    ImGui::SameLine(150); ImGui::Text("%s", buildKeyBindDescriptorString(RtxOptions::FreeCam::keyMoveDown()));
-        ImGui::Text("PitchDown:");   ImGui::SameLine(150); ImGui::Text("%s", buildKeyBindDescriptorString(RtxOptions::FreeCam::keyPitchDown()));
-        ImGui::Text("PitchUp:");     ImGui::SameLine(150); ImGui::Text("%s", buildKeyBindDescriptorString(RtxOptions::FreeCam::keyPitchUp()));
-        ImGui::Text("YawLeft:");     ImGui::SameLine(150); ImGui::Text("%s", buildKeyBindDescriptorString(RtxOptions::FreeCam::keyYawLeft()));
-        ImGui::Text("YawRight:");    ImGui::SameLine(150); ImGui::Text("%s", buildKeyBindDescriptorString(RtxOptions::FreeCam::keyYawRight()));
+        ImGui::TextUnformatted("MoveFaster:");  ImGui::SameLine(150); ImGui::TextUnformatted(buildKeyBindDescriptorString(RtxOptions::FreeCam::keyMoveFaster()).c_str());
+        ImGui::TextUnformatted("MoveForward:"); ImGui::SameLine(150); ImGui::TextUnformatted(buildKeyBindDescriptorString(RtxOptions::FreeCam::keyMoveForward()).c_str());
+        ImGui::TextUnformatted("MoveLeft:");    ImGui::SameLine(150); ImGui::TextUnformatted(buildKeyBindDescriptorString(RtxOptions::FreeCam::keyMoveLeft()).c_str());
+        ImGui::TextUnformatted("MoveBack:");    ImGui::SameLine(150); ImGui::TextUnformatted(buildKeyBindDescriptorString(RtxOptions::FreeCam::keyMoveBack()).c_str());
+        ImGui::TextUnformatted("MoveRight:");   ImGui::SameLine(150); ImGui::TextUnformatted(buildKeyBindDescriptorString(RtxOptions::FreeCam::keyMoveRight()).c_str());
+        ImGui::TextUnformatted("MoveUp:");      ImGui::SameLine(150); ImGui::TextUnformatted(buildKeyBindDescriptorString(RtxOptions::FreeCam::keyMoveUp()).c_str());
+        ImGui::TextUnformatted("MoveDown:");    ImGui::SameLine(150); ImGui::TextUnformatted(buildKeyBindDescriptorString(RtxOptions::FreeCam::keyMoveDown()).c_str());
+        ImGui::TextUnformatted("PitchDown:");   ImGui::SameLine(150); ImGui::TextUnformatted(buildKeyBindDescriptorString(RtxOptions::FreeCam::keyPitchDown()).c_str());
+        ImGui::TextUnformatted("PitchUp:");     ImGui::SameLine(150); ImGui::TextUnformatted(buildKeyBindDescriptorString(RtxOptions::FreeCam::keyPitchUp()).c_str());
+        ImGui::TextUnformatted("YawLeft:");     ImGui::SameLine(150); ImGui::TextUnformatted(buildKeyBindDescriptorString(RtxOptions::FreeCam::keyYawLeft()).c_str());
+        ImGui::TextUnformatted("YawRight:");    ImGui::SameLine(150); ImGui::TextUnformatted(buildKeyBindDescriptorString(RtxOptions::FreeCam::keyYawRight()).c_str());
       }
 
       ImGui::Unindent();
@@ -1020,12 +1024,12 @@ namespace dxvk
   }
 
   void RtCameraSequence::startPlay() {
-    mode.set(Mode::Playback);
+    mode.setDeferred(Mode::Playback);
     m_currentFrame = 0;
   }
 
   void RtCameraSequence::startRecord() {
-    mode.set(Mode::Record);
+    mode.setDeferred(Mode::Record);
     m_currentFrame = 0;
     m_settings.clear();
   }
@@ -1109,14 +1113,16 @@ namespace dxvk
     IMGUI_ADD_TOOLTIP(ImGui::SliderInt("Current Frame", &m_currentFrame, 0, m_settings.size() -1, "%d", ImGuiSliderFlags_AlwaysClamp), "Current Frame.");
     m_currentFrame = std::min(m_currentFrame, (int)m_settings.size());
 
-    if (oldFrame != m_currentFrame && mode() == Mode::None) {
-      mode.set(Mode::Browse);
+    Mode currentMode = mode();
+    if (oldFrame != m_currentFrame && currentMode == Mode::None) {
+      mode.setDeferred(Mode::Browse);
+      currentMode = Mode::Browse;
     }
 
-    bool isRecording = mode() == Mode::Record;
-    bool isPlaying = mode() == Mode::Playback;
-    bool isBrowsing = mode() == Mode::Browse;
-    bool isStopping = mode() == Mode::None;
+    bool isRecording = currentMode == Mode::Record;
+    bool isPlaying = currentMode == Mode::Playback;
+    bool isBrowsing = currentMode == Mode::Browse;
+    bool isStopping = currentMode == Mode::None;
 
     // Record Button
     {
@@ -1164,8 +1170,8 @@ namespace dxvk
     // Stop Button
     {
       if (ImGui::Button("Stop")) {
-        mode.set(Mode::None);
-        RtxOptions::shakeCamera.set(false);
+        mode.setDeferred(Mode::None);
+        RtxOptions::shakeCamera.setDeferred(false);
       }
     }
 
@@ -1181,7 +1187,7 @@ namespace dxvk
       }
 
       if (ImGui::Button("Browse")) {
-        mode.set(Mode::Browse);
+        mode.setDeferred(Mode::Browse);
         m_currentFrame = 0;
       }
 

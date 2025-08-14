@@ -26,6 +26,7 @@
 #include <regex>
 #include <utility>
 #include <filesystem>
+#include <algorithm>
 
 #include "config.h"
 
@@ -1155,6 +1156,10 @@ namespace dxvk {
   void Config::setOption(const std::string& key, const Vector2& value) {
     setOption(key, generateOptionString(value));
   }
+
+  void Config::setOption(const std::string& key, const Vector4& value) {
+    setOption(key, generateOptionString(value));
+  }
   // NV-DXVK end
 
   void Config::setOption(const std::string& key, const Vector3& value) {
@@ -1301,6 +1306,27 @@ namespace dxvk {
 
     return true;
   }
+
+  bool Config::parseOptionValue(
+    const std::string& value,
+    Vector4& result) {
+    std::stringstream ss(value);
+    std::string s;
+    for (int i = 0; i < 4; ++i) {
+      if (!std::getline(ss, s, ',')) {
+        return false;
+      }
+
+      float value;
+      if (!parseOptionValue(s, value)) {
+        return false;
+      }
+
+      result[i] = value;
+    }
+
+    return true;
+  }
   // NV-DXVK end
 
   bool Config::parseOptionValue(
@@ -1334,6 +1360,9 @@ namespace dxvk {
     while (std::getline(ss, s, ',')) {
       VirtualKey vk;
       try {
+        // Strip whitespace from s
+        s.erase(std::remove_if(s.begin(), s.end(), isWhitespace), s.end());
+        
         if(s.find("0x") != std::string::npos) {
           VkValue vkVal = std::stoul(s, nullptr, 16);
           vk.val = vkVal;
@@ -1341,6 +1370,7 @@ namespace dxvk {
           vk = KeyBind::getVk(s);
         }
         if(!KeyBind::isValidVk(vk)) {
+          Logger::err(str::format("Failed to parse virtual key string: '", s, "' string does not map to valid Keybind."));
           return false;
         }
         virtKeys.push_back(vk);
@@ -1401,7 +1431,11 @@ namespace dxvk {
     // Getting a default "App" Config doesn't require parsing a file.
     if constexpr(type == Type_App) {
       const auto exePath = env::getExePath();
-      return getAppConfig(exePath);
+      if (envVarPath.empty()) {
+        return getAppConfig(exePath);
+      } else {
+        return getAppConfig(envVarPath);
+      }
     // A previous conf file has explicitly stated a future conf file must be used...
     } else if(!configPath.empty()) {
       const std::string filePath = configPath + "/" + desc.confName;

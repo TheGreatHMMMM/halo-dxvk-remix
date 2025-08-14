@@ -812,9 +812,7 @@ namespace dxvk {
         ImGui::DragFloat("First Cascade Level's Half Width [meters]", &cascadeMap.levelHalfWidthObject(), 1.f, 0.1f, 10000.f);
 
         ImGui::DragInt("Max Cascade Levels", &cascadeMap.maxLevelsObject(), 1.f, 1, 16);
-        RTX_OPTION_CLAMP(cascadeMap.maxLevels, 1u, 16u);
         ImGui::DragInt("Texture Resolution Per Cascade Level", &cascadeMap.levelResolutionObject(), 8.f, 1, 32 * 1024);
-        RTX_OPTION_CLAMP(cascadeMap.levelResolution, 1u, 32 * 1024u);
         ImGui::Checkbox("Expand Last Cascade Level", &cascadeMap.expandLastCascadeObject());
 
         if (ImGui::CollapsingHeader("Statistics", collapsingHeaderClosedFlags)) {
@@ -865,7 +863,7 @@ namespace dxvk {
 
     if (m_calculatingDisplaceInFactor) {
       m_calculatingDisplaceInFactor = false;
-      Material::Properties::displaceInFactor.set(m_calculatedDisplaceInFactor);
+      Material::Properties::displaceInFactor.setDeferred(m_calculatedDisplaceInFactor);
     }
     m_calculatingDisplaceInFactor = m_calculateDisplaceInFactorNextFrame;
     m_calculateDisplaceInFactorNextFrame = false;

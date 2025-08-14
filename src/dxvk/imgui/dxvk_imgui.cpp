@@ -52,6 +52,7 @@
 #include "dxvk_image.h"
 #include "../util/rc/util_rc_ptr.h"
 #include "../util/util_math.h"
+#include "../util/util_globaltime.h"
 #include "rtx_render/rtx_opacity_micromap_manager.h"
 #include "rtx_render/rtx_bridge_message_channel.h"
 #include "dxvk_imgui_about.h"
@@ -60,6 +61,7 @@
 #include "dxvk_scoped_annotation.h"
 #include "../../d3d9/d3d9_rtx.h"
 #include "dxvk_memory_tracker.h"
+#include "rtx_render/rtx_particle_system.h"
 
 
 namespace dxvk {
@@ -183,7 +185,8 @@ namespace dxvk {
     {"opacitymicromapignoretextures", "Opacity Micromap Ignore Texture (optional)", &RtxOptions::opacityMicromapIgnoreTexturesObject()},
     {"ignorebakedlightingtextures","Ignore Baked Lighting Textures (optional)", &RtxOptions::ignoreBakedLightingTexturesObject()},
     {"ignorealphaontextures","Ignore Alpha Channel of Textures (optional)", &RtxOptions::ignoreAlphaOnTexturesObject()},
-    {"raytracedRenderTargetTextures","Raytraced Render Target Textures (optional)", &RtxOptions::raytracedRenderTargetTexturesObject(), ImGUI::kTextureFlagsRenderTarget}
+    {"raytracedRenderTargetTextures","Raytraced Render Target Textures (optional)", &RtxOptions::raytracedRenderTargetTexturesObject(), ImGUI::kTextureFlagsRenderTarget},
+    {"particleemittertextures","Particle Emitters (optional)", &RtxOptions::particleEmitterTexturesObject()}
   };
 
   ImGui::ComboWithKey<RenderPassGBufferRaytraceMode> renderPassGBufferRaytraceModeCombo {
@@ -224,7 +227,7 @@ namespace dxvk {
   };
 
   ImGui::ComboWithKey<GraphicsPreset> graphicsPresetCombo{
-    "Rendering Preset",
+    "Graphics Preset",
     ImGui::ComboWithKey<GraphicsPreset>::ComboEntries{ {
         {GraphicsPreset::Ultra, "Ultra"},
         {GraphicsPreset::High, "High"},
@@ -266,7 +269,7 @@ namespace dxvk {
   };
 
   ImGui::ComboWithKey<NeuralRadianceCache::QualityPreset> neuralRadianceCacheQualityPresetCombo {
-    "Neural Radiance Cache Quality",
+    "RTX Neural Radiance Cache Quality",
     ImGui::ComboWithKey<NeuralRadianceCache::QualityPreset>::ComboEntries { {
         {NeuralRadianceCache::QualityPreset::Ultra, "Ultra"},
         {NeuralRadianceCache::QualityPreset::High, "High"},
@@ -398,8 +401,8 @@ namespace dxvk {
           "It serves as a reference integration mode for validation of other indirect integration modes." },
         {IntegrateIndirectMode::ReSTIRGI, "ReSTIR GI", 
           "ReSTIR GI provides improved indirect path sampling over \"Importance Sampled\" mode with better indirect diffuse and specular GI quality at increased performance cost."},
-        {IntegrateIndirectMode::NeuralRadianceCache, "Neural Radiance Cache", 
-          "Neural Radiance Cache (NRC). NRC is an AI based world space radiance cache. It is live trained by the path tracer\n"
+        {IntegrateIndirectMode::NeuralRadianceCache, "RTX Neural Radiance Cache", 
+          "RTX Neural Radiance Cache (NRC). NRC is an AI based world space radiance cache. It is live trained by the path tracer\n"
           "and allows paths to terminate early by looking up the cached value and saving performance.\n"
           "NRC supports infinite bounces and often provides results closer to that of reference than ReSTIR GI\n"
           "while increasing performance in scenarios where ray paths have 2 or more bounces on average."}
@@ -559,7 +562,7 @@ namespace dxvk {
     bool rayReconstruction = RtxOptions::enableRayReconstruction();
     if (RtxOptions::showRayReconstructionOption()) {
       ImGui::BeginDisabled(!supportsRR);
-      ImGui::Checkbox("Ray Reconstruction", &RtxOptions::enableRayReconstructionObject());
+      changed = ImGui::Checkbox("Ray Reconstruction", &RtxOptions::enableRayReconstructionObject());
 
       if (RtxOptions::enableRayReconstruction()) {
         rayReconstructionModelCombo.getKey(&DxvkRayReconstruction::modelObject());
@@ -568,10 +571,10 @@ namespace dxvk {
     }
 
     // Disable DLSS-RR if it's unsupported.
-    if (!supportsRR) {
-      RtxOptions::enableRayReconstruction.set(false);
+    if (!supportsRR && RtxOptions::enableRayReconstruction()) {
+      RtxOptions::enableRayReconstruction.setDeferred(false);
+      changed = true;
     }
-    changed = (rayReconstruction != RtxOptions::enableRayReconstruction());
     return changed;
   }
 
@@ -790,7 +793,7 @@ namespace dxvk {
       onOpenMenus();
     }
 
-    RtxOptions::showUI.set(type);
+    RtxOptions::showUI.setDeferred(type);
 
     if (RtxOptions::showUICursor()) {
       ImGui::GetIO().MouseDrawCursor = type != UIType::None;
@@ -912,23 +915,13 @@ namespace dxvk {
 
     // Toggle ImGUI mouse cursor. Alt-Del
     if (io.KeyAlt && ImGui::IsKeyPressed(ImGui::GetKeyIndex(ImGuiKey_Delete))) {
-      RtxOptions::showUICursor.set(!RtxOptions::showUICursor());
-
-      io.MouseDrawCursor = RtxOptions::showUICursor() && RtxOptions::showUI() != UIType::None;
+      RtxOptions::showUICursor.setDeferred(!RtxOptions::showUICursor());
     }
 
     // Toggle input blocking. Alt-Backspace
     if (io.KeyAlt && ImGui::IsKeyPressed(ImGui::GetKeyIndex(ImGuiKey_Backspace))) {
-      RtxOptions::blockInputToGameInUI.set(!RtxOptions::blockInputToGameInUI());
-      sendUIActivationMessage();
+      RtxOptions::blockInputToGameInUI.setDeferred(!RtxOptions::blockInputToGameInUI());
     }
-  }
-
-  void ImGUI::sendUIActivationMessage() {
-    const bool doBlock = RtxOptions::blockInputToGameInUI() && RtxOptions::showUI() != UIType::None;
-
-    BridgeMessageChannel::get().send("UWM_REMIX_UIACTIVE_MSG",
-                                     doBlock ? 1 : 0, 0);
   }
 
   void ImGUI::update(const Rc<DxvkContext>& ctx) {
@@ -993,22 +986,25 @@ namespace dxvk {
 
       switch (sQuickAction) {
       case RtxQuickAction::kOriginal:
-        RtxOptions::enableRaytracing.set(false);
-        RtxOptions::enableReplacementLights.set(false);
-        RtxOptions::enableReplacementMaterials.set(false);
-        RtxOptions::enableReplacementMeshes.set(false);
+        RtxOptions::enableRaytracing.setDeferred(false);
+        RtxOptions::enableReplacementLights.setDeferred(false);
+        RtxOptions::enableReplacementMaterials.setDeferred(false);
+        RtxOptions::enableReplacementMeshes.setDeferred(false);
         break;
       case RtxQuickAction::kRtxOnEnhanced:
-        RtxOptions::enableRaytracing.set(true);
-        RtxOptions::enableReplacementLights.set(true);
-        RtxOptions::enableReplacementMaterials.set(true);
-        RtxOptions::enableReplacementMeshes.set(true);
+        RtxOptions::enableRaytracing.setDeferred(true);
+        RtxOptions::enableReplacementLights.setDeferred(true);
+        RtxOptions::enableReplacementMaterials.setDeferred(true);
+        RtxOptions::enableReplacementMeshes.setDeferred(true);
         break;
       case RtxQuickAction::kRtxOn:
-        RtxOptions::enableRaytracing.set(true);
-        RtxOptions::enableReplacementLights.set(false);
-        RtxOptions::enableReplacementMaterials.set(false);
-        RtxOptions::enableReplacementMeshes.set(false);
+        RtxOptions::enableRaytracing.setDeferred(true);
+        RtxOptions::enableReplacementLights.setDeferred(false);
+        RtxOptions::enableReplacementMaterials.setDeferred(false);
+        RtxOptions::enableReplacementMeshes.setDeferred(false);
+        break;
+      case RtxQuickAction::kCount:
+        assert(false && "invalid RtxQuickAction::kCount in ImGUI::updateQuickActions");
         break;
       }
     }
@@ -1080,6 +1076,9 @@ namespace dxvk {
               break;
             case kTab_Development:
               showDevelopmentSettings(ctx);
+              break;
+            case kTab_Count:
+              assert(false && "kTab_Count hit in ImGUI::showMainMenu");
               break;
             }
             m_curTab = tab;
@@ -1170,7 +1169,7 @@ namespace dxvk {
           ImGui::EndTabItem();
         }
 
-        if (ImGui::BeginTabItem("Rendering", nullptr, tab_item_flags)) {
+        if (ImGui::BeginTabItem("Graphics", nullptr, tab_item_flags)) {
           showUserRenderingSettings(ctx, subItemWidth, subItemIndent);
 
           ImGui::EndTabItem();
@@ -1353,6 +1352,9 @@ namespace dxvk {
 
           break;
         }
+        case UpscalerType::None:
+          // No custom UI here.
+          break;
       }
 
       ImGui::Unindent(static_cast<float>(subItemIndent));
@@ -1403,7 +1405,9 @@ namespace dxvk {
 
     ImGui::TextSeparator("Preset Settings");
 
-    m_userGraphicsSettingChanged |= graphicsPresetCombo.getKey(&RtxOptions::graphicsPresetObject());
+    const auto graphicsPresetChanged = graphicsPresetCombo.getKey(&RtxOptions::graphicsPresetObject());
+
+    m_userGraphicsSettingChanged |= graphicsPresetChanged;
 
     // Map settings to indirect particle level
     int indirectLightParticlesLevel = 0;
@@ -1413,7 +1417,7 @@ namespace dxvk {
 
     // Map presets to options
 
-    if (m_userGraphicsSettingChanged) {
+    if (graphicsPresetChanged) {
       RtxOptions::updateGraphicsPresets(ctx->getDevice().ptr());
     }
 
@@ -1427,7 +1431,6 @@ namespace dxvk {
 
       m_userGraphicsSettingChanged |= minPathBouncesCombo.getKey(&RtxOptions::pathMinBouncesObject());
       m_userGraphicsSettingChanged |= maxPathBouncesCombo.getKey(&RtxOptions::pathMaxBouncesObject());
-      m_userGraphicsSettingChanged |= ImGui::Checkbox("Enable Volumetric Lighting", &RtxGlobalVolumetrics::enableObject());
       m_userGraphicsSettingChanged |= indirectLightingParticlesCombo.getKey(&indirectLightParticlesLevel);
       ImGui::SetTooltipToLastWidgetOnHover("Controls the quality of particles in indirect (reflection/GI) rays.");
 
@@ -1440,7 +1443,6 @@ namespace dxvk {
         ImGui::BeginDisabled(!enableNeuralRadianceCache);
         
         if (neuralRadianceCacheQualityPresetCombo.getKey(&NeuralRadianceCache::NrcOptions::qualityPresetObject())) {
-          nrc.applyQualityPreset();
           m_userGraphicsSettingChanged = true;
         }
 
@@ -1456,16 +1458,33 @@ namespace dxvk {
       ImGui::EndDisabled();
     }
 
+    // Volumetrics Settings
+
+    ImGui::TextSeparator("RTX Volumetrics Settings");
+    {
+      m_userGraphicsSettingChanged |= ImGui::Checkbox("Enable Volumetric Lighting", &RtxGlobalVolumetrics::enableObject());
+      ImGui::BeginDisabled(!RtxGlobalVolumetrics::enable());
+      ImGui::Indent(static_cast<float>(subItemIndent));
+      common->metaGlobalVolumetrics().showImguiUserSettings();
+      ImGui::EndDisabled();
+      ImGui::Unindent(static_cast<float>(subItemIndent));
+    }
+
     // Post Effect Settings
 
     ImGui::TextSeparator("Post Effect Settings");
 
     {
-      // Note: Disabled flags should match preset mapping above to prevent changing settings when a preset overrides them.
+      {
+        // Note: All presets aside from Custom will overwrite this, so only enable for Custom.
+        ImGui::BeginDisabled(RtxOptions::graphicsPreset() != GraphicsPreset::Custom);
+        m_userGraphicsSettingChanged |= ImGui::Checkbox("Enable Post Effects", &postFx.enableObject());
+        ImGui::EndDisabled();
+      }
+
+      // Note: Medium and Low presets disable all post effects, so no value in changing the individual settings.
+      // High and Ultra allow these to be changed without requiring Custom, so leave enabled for those.
       ImGui::BeginDisabled(RtxOptions::graphicsPreset() == GraphicsPreset::Medium || RtxOptions::graphicsPreset() == GraphicsPreset::Low);
-
-      m_userGraphicsSettingChanged |= ImGui::Checkbox("Enable Post Effects", &postFx.enableObject());
-
       {
         ImGui::PushItemWidth(static_cast<float>(subItemWidth));
         ImGui::Indent(static_cast<float>(subItemIndent));
@@ -1497,16 +1516,16 @@ namespace dxvk {
     if (RtxOptions::graphicsPreset() == GraphicsPreset::Custom) {
       switch (indirectLightParticlesLevel) {
       case 0:
-        RtxOptions::enableUnorderedEmissiveParticlesInIndirectRays.set(false);
-        RtxOptions::enableUnorderedResolveInIndirectRays.set(false);
+        RtxOptions::enableUnorderedEmissiveParticlesInIndirectRays.setDeferred(false);
+        RtxOptions::enableUnorderedResolveInIndirectRays.setDeferred(false);
         break;
       case 1:
-        RtxOptions::enableUnorderedEmissiveParticlesInIndirectRays.set(false);
-        RtxOptions::enableUnorderedResolveInIndirectRays.set(true);
+        RtxOptions::enableUnorderedEmissiveParticlesInIndirectRays.setDeferred(false);
+        RtxOptions::enableUnorderedResolveInIndirectRays.setDeferred(true);
         break;
       case 2:
-        RtxOptions::enableUnorderedEmissiveParticlesInIndirectRays.set(true);
-        RtxOptions::enableUnorderedResolveInIndirectRays.set(true);
+        RtxOptions::enableUnorderedEmissiveParticlesInIndirectRays.setDeferred(true);
+        RtxOptions::enableUnorderedResolveInIndirectRays.setDeferred(true);
         break;
       }
     }
@@ -1611,6 +1630,7 @@ namespace dxvk {
       case Mod::ProgressState::ProcessingMaterials: replacementLoadingSubtext += str::format("Processing Materials (", replacementState.progressCount, " processed)"); break;
       case Mod::ProgressState::ProcessingMeshes: replacementLoadingSubtext += str::format("Processing Meshes (", replacementState.progressCount, " processed)"); break;
       case Mod::ProgressState::ProcessingLights: replacementLoadingSubtext += str::format("Processing Lights (", replacementState.progressCount, " processed)"); break;
+      default: break;
       }
 
       if (
@@ -1890,9 +1910,7 @@ namespace dxvk {
       ImGui::Checkbox("Enable Instance Debugging", &RtxOptions::enableInstanceDebuggingToolsObject());
       ImGui::Checkbox("Disable Draw Calls Post RTX Injection", &RtxOptions::skipDrawCallsPostRTXInjectionObject());
       ImGui::Checkbox("Break into Debugger On Press of Key 'B'", &RtxOptions::enableBreakIntoDebuggerOnPressingBObject());
-      if (ImGui::Checkbox("Block Input to Game in UI", &RtxOptions::blockInputToGameInUIObject())) {
-        sendUIActivationMessage();
-      }
+      ImGui::Checkbox("Block Input to Game in UI", &RtxOptions::blockInputToGameInUIObject());
       ImGui::Checkbox("Force Camera Jitter", &RtxOptions::forceCameraJitterObject());
       ImGui::DragInt("Camera Jitter Sequence Length", &RtxOptions::cameraJitterSequenceLengthObject());
       
@@ -1901,10 +1919,6 @@ namespace dxvk {
       ImGui::InputInt("Instance Index Range", &RtxOptions::instanceOverrideInstanceIdxRangeObject());
       ImGui::DragFloat3("Instance World Offset", &RtxOptions::instanceOverrideWorldOffsetObject(), 0.1f, -100.f, 100.f, "%.3f", sliderFlags);
       ImGui::Checkbox("Instance - Print Hash", &RtxOptions::instanceOverrideSelectedInstancePrintMaterialHashObject());
-
-#ifdef REMIX_DEVELOPMENT
-      ImGui::Checkbox("Show DLSS-RR Options", &RtxOptions::showRayReconstructionUIObject());
-#endif
 
       ImGui::Unindent();
       ImGui::Checkbox("Throttle presents", &RtxOptions::enablePresentThrottleObject());
@@ -2243,7 +2257,7 @@ namespace dxvk {
         const auto nvidiaColor = ImVec4(0.462745f, 0.725490f, 0.f, 1.f);
 
         const auto color = (texHash == textureInPopup ? blueColor : nvidiaColor);
-        const float anim = animatedHighlightIntensity(common->getSceneManager().getGameTimeSinceStartMS());
+        const float anim = animatedHighlightIntensity(GlobalTime::get().absoluteTimeMs());
         ImGui::PushStyleColor(ImGuiCol_Button, ImVec4(anim * color.x, anim * color.y, anim * color.z, 1.f));
       } else if (textureHasSelection) {
         ImGui::PushStyleColor(ImGuiCol_Button, ImVec4(0.996078f, 0.329412f, 0.f, 1.f));
@@ -2535,7 +2549,7 @@ namespace dxvk {
           ImGui::SetTooltipUnformatted(RtxOptions::textureGridThumbnailScale.getDescription());
         }
 
-        RtxOptions::textureGridThumbnailScale.set(static_cast<float>(percentage) / 100.f);
+        RtxOptions::textureGridThumbnailScale.setDeferred(static_cast<float>(percentage) / 100.f);
       }
 
       ImGui::Checkbox("Split Texture Category List", &showLegacyTextureGuiObject());
@@ -2623,6 +2637,7 @@ namespace dxvk {
 
       ImGui::DragFloat("Vertex Color Strength", &RtxOptions::vertexColorStrengthObject(), 0.001f, 0.0f, 1.0f);
       ImGui::Checkbox("Vertex Color Is Baked Lighting", &RtxOptions::vertexColorIsBakedLightingObject());
+      ImGui::Checkbox("Ignore All Baked Lighting", &RtxOptions::ignoreAllVertexColorBakedLightingObject());
       ImGui::Separator();
 
       if (ImGui::CollapsingHeader("Heuristics", collapsingHeaderClosedFlags)) {
@@ -2689,7 +2704,7 @@ namespace dxvk {
           extIdx = std::clamp(bit::tzcnt(RtxOptions::skyProbeSide()), 8u, 13u) - 8;
 
           ImGui::Combo("Sky Probe Extent", &extIdx, exts, IM_ARRAYSIZE(exts));
-          RtxOptions::skyProbeSide.set(1 << (extIdx + 8));
+          RtxOptions::skyProbeSide.setDeferred(1 << (extIdx + 8));
 
           ImGui::Unindent();
         }
@@ -2780,15 +2795,19 @@ namespace dxvk {
 
   void ImGUI::showVsyncOptions(bool enableDLFGGuard) {
     // we should never get here without a swapchain, so we must have latched the vsync value already
-    assert(RtxOptions::enableVsync() != EnableVsync::WaitingForImplicitSwapchain);
+    assert(RtxOptions::enableVsyncState != EnableVsync::WaitingForImplicitSwapchain);
     
     if (enableDLFGGuard && DxvkDLFG::enable()) {
       ImGui::BeginDisabled();
     }
 
-    bool vsyncEnabled = RtxOptions::enableVsync() == EnableVsync::On;
-    ImGui::Checkbox("Enable V-Sync", &vsyncEnabled);
-    RtxOptions::enableVsync.set(vsyncEnabled ? EnableVsync::On : EnableVsync::Off);
+    bool vsyncEnabled = RtxOptions::enableVsyncState == EnableVsync::On;
+    bool changed = ImGui::Checkbox("Enable V-Sync", &vsyncEnabled);
+    if (changed) {
+      // option has been toggled manually, so we need to actually store the value in the option.
+      // RtxOptions::enableVsyncState will be changed by the onChange handler at the end of the frame.
+      RtxOptions::enableVsync.setDeferred(vsyncEnabled ? EnableVsync::On : EnableVsync::Off);
+    }
 
     ImGui::BeginDisabled();
     ImGui::Indent();
@@ -2814,7 +2833,8 @@ namespace dxvk {
       ImGui::BeginDisabled();
     }
 
-    m_userGraphicsSettingChanged |= ImGui::Checkbox("Enable DLSS Frame Generation", &DxvkDLFG::enableObject());
+    bool dlfgChanged = ImGui::Checkbox("Enable DLSS Frame Generation", &DxvkDLFG::enableObject());
+    m_userGraphicsSettingChanged |= dlfgChanged;
     if (supportsMultiFrame) {
       dlfgMfgModeCombo.getKey(&DxvkDLFG::maxInterpolatedFramesObject());
     }
@@ -2829,12 +2849,16 @@ namespace dxvk {
       ImGui::EndDisabled();
     }
 
-    // Force Reflex on when using G
-    if (supportsDLFG && ctx->isDLFGEnabled()) {
-      RtxOptions::reflexMode.set(ReflexMode::LowLatency);
-    } else {
-      DxvkDLFG::enable.set(false);
+    // Need to change Reflex in sync with DLFG, not on the next frame.
+    if (dlfgChanged) {
+      if (!supportsDLFG) {
+        DxvkDLFG::enable.setDeferred(false);
+      } else if (!DxvkDLFG::enable()){
+        // DLFG was just enabled.  force Reflex to Low Latency.
+        RtxOptions::reflexMode.setDeferred(ReflexMode::LowLatency);
+      }
     }
+
   }
 
   void ImGUI::showReflexOptions(const Rc<DxvkContext>& ctx, bool displayStatsWindowToggle) {
@@ -3055,8 +3079,9 @@ namespace dxvk {
 
       RtxOptions::updatePresetFromUpscaler();
 
-      if (RtxOptions::upscalerType() == UpscalerType::DLSS && !ctx->getCommonObjects()->metaDLSS().supportsDLSS())
-        RtxOptions::upscalerType.set(UpscalerType::TAAU);
+      if (RtxOptions::upscalerType() == UpscalerType::DLSS && !ctx->getCommonObjects()->metaDLSS().supportsDLSS()) {
+        RtxOptions::upscalerType.setDeferred(UpscalerType::TAAU);
+      }
 
       if (RtxOptions::isRayReconstructionEnabled()) {
         dlssProfileCombo.getKey(&RtxOptions::qualityDLSSObject());
@@ -3105,7 +3130,7 @@ namespace dxvk {
         ImGui::Checkbox("Track Particle Object", &RtxOptions::trackParticleObjectsObject());
 
         ImGui::SliderFloat("Resolve Transparency Threshold", &RtxOptions::resolveTransparencyThresholdObject(), 0.0f, 1.0f);
-        RtxOptions::resolveOpaquenessThreshold.set(std::max(RtxOptions::resolveTransparencyThreshold(), RtxOptions::resolveOpaquenessThreshold()));
+        RtxOptions::resolveOpaquenessThreshold.setDeferred(std::max(RtxOptions::resolveTransparencyThreshold(), RtxOptions::resolveOpaquenessThreshold()));
         ImGui::SliderFloat("Resolve Opaqueness Threshold", &RtxOptions::resolveOpaquenessThresholdObject(), 0.0f, 1.0f);
 
         ImGui::Unindent();
@@ -3264,7 +3289,7 @@ namespace dxvk {
             ImGui::Unindent();
           }
         } else if (RtxOptions::integrateIndirectMode() == IntegrateIndirectMode::NeuralRadianceCache) {
-          if (ImGui::CollapsingHeader("Neural Radiance Cache", collapsingHeaderClosedFlags)) {
+          if (ImGui::CollapsingHeader("RTX Neural Radiance Cache", collapsingHeaderClosedFlags)) {
 
             ImGui::Indent();
             ImGui::PushID("Neural Radiance Cache");
@@ -3290,7 +3315,9 @@ namespace dxvk {
       ImGui::Unindent();
     }
 
-    if (ImGui::CollapsingHeader("Global Volumetrics", collapsingHeaderClosedFlags)) {
+    RtxParticleSystemManager::showImguiSettings();
+
+    if (ImGui::CollapsingHeader("RTX Volumetrics (Global)", collapsingHeaderClosedFlags)) {
       ImGui::Indent();
 
       common->metaGlobalVolumetrics().showImguiSettings();
@@ -3339,7 +3366,14 @@ namespace dxvk {
 
       ImGui::Separator();
       ImGui::SliderFloat("Particle Softness", &RtxOptions::particleSoftnessFactorObject(), 0.f, 0.5f);
-
+      ImGui::Separator();
+      if (ImGui::CollapsingHeader("Weighted Blended OIT", collapsingHeaderClosedFlags)) {
+        ImGui::Checkbox("Enable", &RtxOptions::wboitEnabledObject());
+        ImGui::BeginDisabled(!RtxOptions::wboitEnabled());
+        ImGui::SliderFloat("Energy Compensation", &RtxOptions::wboitEnergyLossCompensationObject(), 1.f, 10.f);
+        ImGui::SliderFloat("Depth Weight Tuning", &RtxOptions::wboitDepthWeightTuningObject(), 0.01f, 10.f);
+        ImGui::EndDisabled();
+      }
       common->metaComposite().showStochasticAlphaBlendImguiSettings();
       ImGui::Unindent();
     }
@@ -3371,7 +3405,7 @@ namespace dxvk {
         ImGui::Unindent();
       }
       bool useDoubleDenoisers = RtxOptions::denoiseDirectAndIndirectLightingSeparately();
-      if (isRayReconstructionEnabled && RtxOptions::showRayReconstructionUI()) {
+      if (isRayReconstructionEnabled) {
         if (ImGui::CollapsingHeader("DLSS-RR", collapsingHeaderClosedFlags)) {
           ImGui::Indent();
           ImGui::PushID("DLSS-RR");
@@ -3498,7 +3532,6 @@ namespace dxvk {
                                         0.5f, 1.f, 32.f, "%.1f GB", ImGuiSliderFlags_NoRoundToFormat)) {
             ctx->getCommonObjects()->getSceneManager().requestVramCompaction();
           }
-          RTX_OPTION_CLAMP(RtxOptions::TextureManager::fixedBudgetMiB, 256, 1024 * 32);
         } else {
           // always disabled drag float just to show the available texture cache budget
           ImGui::BeginDisabled(true);
@@ -3576,18 +3609,18 @@ namespace dxvk {
 
         switch (mode) {
         case TerrainMode::None: {
-          TerrainBaker::enableBaking.set(false);
-          RtxOptions::terrainAsDecalsEnabledIfNoBaker.set(false);
+          TerrainBaker::enableBaking.setDeferred(false);
+          RtxOptions::terrainAsDecalsEnabledIfNoBaker.setDeferred(false);
           break;
         }
         case TerrainMode::TerrainBaker: {
-          TerrainBaker::enableBaking.set(true);
-          RtxOptions::terrainAsDecalsEnabledIfNoBaker.set(false);
+          TerrainBaker::enableBaking.setDeferred(true);
+          RtxOptions::terrainAsDecalsEnabledIfNoBaker.setDeferred(false);
           break;
         }
         case TerrainMode::AsDecals: {
-          TerrainBaker::enableBaking.set(false);
-          RtxOptions::terrainAsDecalsEnabledIfNoBaker.set(true);
+          TerrainBaker::enableBaking.setDeferred(false);
+          RtxOptions::terrainAsDecalsEnabledIfNoBaker.setDeferred(true);
           break;
         }
         default: break;
@@ -3659,8 +3692,8 @@ namespace dxvk {
           ImGui::DragFloat("Noise Scale", &ViewDistanceOptions::noiseScaleObject(), 0.1f, 0.0f, 0.0f, "%.2f", sliderFlags);
 
           // Note: ImGui's limits do not apply for text entry for whatever reason so we need to clamp these options manually to ensure they do not trigger asserts.
-          ViewDistanceOptions::distanceFadeMin.set(std::min(ViewDistanceOptions::distanceFadeMin(), ViewDistanceOptions::distanceFadeMax()));
-          ViewDistanceOptions::distanceFadeMax.set(std::max(ViewDistanceOptions::distanceFadeMin(), ViewDistanceOptions::distanceFadeMax()));
+          ViewDistanceOptions::distanceFadeMin.setDeferred(std::min(ViewDistanceOptions::distanceFadeMin(), ViewDistanceOptions::distanceFadeMax()));
+          ViewDistanceOptions::distanceFadeMax.setDeferred(std::max(ViewDistanceOptions::distanceFadeMin(), ViewDistanceOptions::distanceFadeMax()));
         }
       }
 
@@ -3686,25 +3719,30 @@ namespace dxvk {
 
     if (!RtCamera::enableFreeCamera() &&
         ImGui::CollapsingHeader("Anti-Culling", collapsingHeaderClosedFlags)) {
+
       ImGui::Indent();
 
-      ImGui::Checkbox("Anti-Culling Objects", &RtxOptions::AntiCulling::Object::enableObject());
-      if (RtxOptions::AntiCulling::Object::enable()) {
-        ImGui::Checkbox("High precision Anti-Culling", &RtxOptions::AntiCulling::Object::enableHighPrecisionAntiCullingObject());
-        if (RtxOptions::AntiCulling::Object::enableHighPrecisionAntiCulling()) {
-          ImGui::Checkbox("Infinity Far Frustum", &RtxOptions::AntiCulling::Object::enableInfinityFarFrustumObject());
+      if (ctx->getCommonObjects()->getSceneManager().isAntiCullingSupported()) {
+        ImGui::Checkbox("Anti-Culling Objects", &RtxOptions::AntiCulling::Object::enableObject());
+        if (RtxOptions::AntiCulling::Object::enable()) {
+          ImGui::Checkbox("High precision Anti-Culling", &RtxOptions::AntiCulling::Object::enableHighPrecisionAntiCullingObject());
+          if (RtxOptions::AntiCulling::Object::enableHighPrecisionAntiCulling()) {
+            ImGui::Checkbox("Infinity Far Frustum", &RtxOptions::AntiCulling::Object::enableInfinityFarFrustumObject());
+          }
+          ImGui::Checkbox("Enable Bounding Box Hash For Duplication Check", &RtxOptions::AntiCulling::Object::hashInstanceWithBoundingBoxHashObject());
+          ImGui::InputInt("Instance Max Size", &RtxOptions::AntiCulling::Object::numObjectsToKeepObject(), 1, 1, 0);
+          ImGui::DragFloat("Anti-Culling Fov Scale", &RtxOptions::AntiCulling::Object::fovScaleObject(), 0.01f, 0.1f, 2.0f);
+          ImGui::DragFloat("Anti-Culling Far Plane Scale", &RtxOptions::AntiCulling::Object::farPlaneScaleObject(), 0.1f, 0.1f, 10000.0f);
         }
-        ImGui::Checkbox("Enable Bounding Box Hash For Duplication Check", &RtxOptions::AntiCulling::Object::hashInstanceWithBoundingBoxHashObject());
-        ImGui::InputInt("Instance Max Size", &RtxOptions::AntiCulling::Object::numObjectsToKeepObject(), 1, 1, 0);
-        ImGui::DragFloat("Anti-Culling Fov Scale", &RtxOptions::AntiCulling::Object::fovScaleObject(), 0.01f, 0.1f, 2.0f);
-        ImGui::DragFloat("Anti-Culling Far Plane Scale", &RtxOptions::AntiCulling::Object::farPlaneScaleObject(), 0.1f, 0.1f, 10000.0f);
-      }
-      ImGui::Separator();
-      ImGui::Checkbox("Anti-Culling Lights", &RtxOptions::AntiCulling::Light::enableObject());
-      if (RtxOptions::AntiCulling::Light::enable()) {
-        ImGui::InputInt("Max Number Of Lights", &RtxOptions::AntiCulling::Light::numLightsToKeepObject(), 1, 1, 0);
-        ImGui::InputInt("Max Number of Frames to keep lights", &RtxOptions::AntiCulling::Light::numFramesToExtendLightLifetimeObject(), 1, 1, 0);
-        ImGui::DragFloat("Anti-Culling Lights Fov Scale", &RtxOptions::AntiCulling::Light::fovScaleObject(), 0.01f, 0.1f, 2.0f);
+        ImGui::Separator();
+        ImGui::Checkbox("Anti-Culling Lights", &RtxOptions::AntiCulling::Light::enableObject());
+        if (RtxOptions::AntiCulling::Light::enable()) {
+          ImGui::InputInt("Max Number Of Lights", &RtxOptions::AntiCulling::Light::numLightsToKeepObject(), 1, 1, 0);
+          ImGui::InputInt("Max Number of Frames to keep lights", &RtxOptions::AntiCulling::Light::numFramesToExtendLightLifetimeObject(), 1, 1, 0);
+          ImGui::DragFloat("Anti-Culling Lights Fov Scale", &RtxOptions::AntiCulling::Light::fovScaleObject(), 0.01f, 0.1f, 2.0f);
+        }
+      } else {
+        ImGui::Text("The game doesn't set up the View Matrix, \nAnti-Culling is disabled to prevent visual corruption.");
       }
 
       ImGui::Unindent();
