@@ -519,6 +519,20 @@ inline Vector4 toFloat4(const pxr::GfVec4f& v) {
   return f;
 }
 
+inline ParticleBillboardType toBillboardType(const pxr::TfToken& token) {
+  static pxr::RemixTokensType tokens;
+  if (token == tokens.faceCamera_UpAxisLocked) {
+    return FaceCamera_UpAxisLocked;
+  }
+  if (token == tokens.faceCamera_Position) {
+    return FaceCamera_Position;
+  }
+  if (token == tokens.faceWorldUp) {
+    return FaceWorldUp;
+  }
+  return FaceCamera_Spherical;
+}
+
 std::optional<RtxParticleSystemDesc> UsdMod::Impl::processParticleSystem(Args& args, const pxr::UsdPrim& prim) {
   using namespace pxr;
 
@@ -533,7 +547,7 @@ std::optional<RtxParticleSystemDesc> UsdMod::Impl::processParticleSystem(Args& a
             if (UsdAttribute attr = particleSystem.GetPrimvarsParticle##attrName##Attr()) { \
                 Type result; \
                 attr.Get<Type>(&result); \
-                particleDesc.field = (Type)result; \
+                particleDesc.field = result; \
             } 
 #define READ_ATTR_CONV(Type, attrName, field, conversionFunc) \
             if (UsdAttribute attr = particleSystem.GetPrimvarsParticle##attrName##Attr()) { \
@@ -571,12 +585,13 @@ std::optional<RtxParticleSystemDesc> UsdMod::Impl::processParticleSystem(Args& a
   READ_ATTR(bool, EnableMotionTrail, enableMotionTrail);
   READ_ATTR(bool, HideEmitter, hideEmitter);
   READ_ATTR(float, SpawnRatePerSecond, spawnRate);
+  READ_ATTR_CONV(TfToken, BillboardType, billboardType, toBillboardType);
   READ_ATTR_CONV(GfVec4f, MaxSpawnColor, maxSpawnColor, toFloat4);
   READ_ATTR_CONV(GfVec4f, MinSpawnColor, minSpawnColor, toFloat4);
   READ_ATTR_CONV(GfVec4f, MaxTargetColor, maxTargetColor, toFloat4);
   READ_ATTR_CONV(GfVec4f, MinTargetColor, minTargetColor, toFloat4);
   // If this assert fails a new particle system parameter added, please update here.
-  assert(RemixParticleSystemAPI::GetSchemaAttributeNames(false).size() == 32);
+  assert(RemixParticleSystemAPI::GetSchemaAttributeNames(false).size() == 33);
 
 #undef READ_ATTR
 #undef READ_ATTR_CONV
@@ -1271,9 +1286,14 @@ void UsdMod::Impl::addReplacementsSync(dxvk::Rc<dxvk::DxvkCommandList> cmdList, 
       {
         constexpr uint64_t initialSignalValue = 0;
         constexpr uint64_t waitSignalValue = 1;
-        auto replacementSyncSignal = new sync::Fence(initialSignalValue);
+        Rc<sync::Fence> replacementSyncSignal = new sync::Fence(initialSignalValue);
 
         cmdList->queueSignal(replacementSyncSignal, waitSignalValue);
+        // Note: May be possible that the command list's signal tracker can be reset before this wait call or before the signal is actually signaled, which may cause this
+        // wait to never complete. Unsure if this happens in practice, but previously a bug existed where a ref-counted pointer to the replacement signal wasn't used
+        // which resulted in a crash due to the object being freed before getting to this wait call, and the only way it would've been freed is if the command list's signal
+        // tracker was reset. it is possible that most/all the times this reset happens the signal has been properly signaled though and this may not be a concern, but
+        // something to watch out for regardless.
         replacementSyncSignal->wait(waitSignalValue);
       }
 
