@@ -71,19 +71,18 @@ float3 colorGrading(float3 inputColor)
 
 // Photographic Tone Reproduction for Digital Images
 // http://www.cs.utah.edu/~reinhard/cdrom/tonemap.pdf
-float3 reinhardToneMapper(float3 inputColor) 
+float3 reinhardToneMapper(float3 inputColor, float white) 
 {
+  // per luminance reinhard
   float inputLuminance = calcBt709Luminance(inputColor);
-  
-  // (Eq. 4) Scale the luminance down to compress bright highlights to representable LDR values
-  float outputLuminance = inputLuminance / (1.0f + inputLuminance);
-  
-  // (Not Reinhard Operator) Make the curve S-shaped to boost shadow contrast
-  // Should only activate when outputLuminance < e^gToneMappingShadowContrastEnd
-  outputLuminance *= pow(min(1.0f, outputLuminance * exp(-cb.shadowContrastEnd)), cb.shadowContrast);
-  
-  // Apply output luminance to the input
-  return inputColor * (outputLuminance / inputLuminance);  
+  float outputLuminance = inputLuminance * (1.0f + (inputLuminance / (white * white)));
+  outputLuminance = inputLuminance / (1.0f + inputLuminance);
+  return inputColor * (outputLuminance / inputLuminance); 
+
+  // per channel reinhard
+  // inputColor = inputColor * (1.0f + (inputColor / (white * white)));
+  // inputColor = inputColor / (1.0f + inputColor);
+  // return inputColor;
 }
 
 // Heji and Burgess-Dawson tone curve, from
@@ -192,8 +191,9 @@ float3 applyToneMapping(float3 color, uint2 pixelPosition)
 void main(uint2 threadId : SV_DispatchThreadID)
 {
   float3 inputColor = imageLoad(InColorBuffer, threadId).xyz;
-
-  float3 outputColor = applyToneMapping(inputColor, threadId);
+  inputColor *= getExposure(InExposure, cb.enableAutoExposure, cb.exposureFactor);
+  float3 outputColor = reinhardToneMapper(inputColor, 2.0f);
+  outputColor = linearToGamma(outputColor);
 
   // clamp outputColor to avoid problems with NIS
   outputColor = saturate(outputColor);
