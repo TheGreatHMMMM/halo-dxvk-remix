@@ -694,7 +694,8 @@ namespace dxvk {
     getSceneManager().clearFogState();
 
     // apply changes to RtxOptions after the frame has ended
-    RtxOption<bool>::applyPendingValues();
+    RtxOption<bool>::applyPendingValuesOptionLayers();
+    RtxOption<bool>::applyPendingValues(m_device.ptr());
 
     // Update stats
     updateMetrics(gpuIdleTimeMilliseconds);
@@ -1190,7 +1191,6 @@ namespace dxvk {
 
     constants.uniformRandomNumber = jenkinsHash(constants.frameIdx);
     constants.vertexColorStrength = RtxOptions::vertexColorStrength();
-    constants.vertexColorIsBakedLighting = RtxOptions::vertexColorIsBakedLighting();
     constants.viewModelRayTMax = RtxOptions::ViewModel::rangeMeters() * RtxOptions::getMeterToWorldUnitScale();
     constants.roughnessDemodulationOffset = m_common->metaDemodulate().demodulateRoughnessOffset();
     

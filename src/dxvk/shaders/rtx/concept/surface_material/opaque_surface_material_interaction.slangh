@@ -623,7 +623,7 @@ OpaqueSurfaceMaterialInteraction opaqueSurfaceMaterialInteractionCreate(
   if (applyTextureOperations) 
 #endif
   {
-    if (cb.vertexColorIsBakedLighting) {
+    if (surface.isVertexColorBakedLighting) {
       // "Normalize" vertex color to remove lighting contribution in different vertices.
       // We assume the diffuse term contributes most lighting. Therefore, vertex color = diffuseColor * (N*L).
       // By dividing the vertex color by its largest component, the result is irrelavant to N*L, but proportional to the 
@@ -1780,7 +1780,8 @@ SurfaceMaterialInteractionSplitWeight opaqueSurfaceMaterialInteractionCalcApprox
   // Calculate the weight
   const f16vec3 fresnel = evalOpaqueSchlickFresnel(opaqueSurfaceMaterialInteraction.baseReflectivity, outputDirectionDotMicrofacetNormal);
   const float16_t normalDistributionFunction = evalGGXNormalDistributionIsotropic(opaqueSurfaceMaterialInteraction.isotropicRoughness, normalDotMicrofacetNormal);
-  const float16_t visibility = float16_t(1) / (float16_t(4) * normalDotInputDirection * normalDotOutputDirection);
+  // Note: Actual shadowing/masking (G) function omitted from visibility calculation for a cheaper approximation.
+  const float16_t visibility = safePositiveDivide(float16_t(1), float16_t(4) * normalDotInputDirection * normalDotOutputDirection, materialEpsilon);
   const f16vec3 diffuseReflectionWeight = opaqueSurfaceMaterialInteraction.albedo;
   const f16vec3 specularReflectionWeight = min(normalDistributionFunction * visibility * fresnel, f16vec3(float16Max));
 

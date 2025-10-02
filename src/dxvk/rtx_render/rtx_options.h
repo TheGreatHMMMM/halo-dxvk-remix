@@ -292,7 +292,10 @@ namespace dxvk {
     RTX_OPTION_ENV("rtx", DlssPreset, dlssPreset, DlssPreset::On, "RTX_DLSS_PRESET", "Combined DLSS Preset for quickly controlling Upscaling, Frame Interpolation and Latency Reduction.");
     RTX_OPTION("rtx", NisPreset, nisPreset, NisPreset::Balanced, "Adjusts NIS scaling factor, trades quality for performance.");
     RTX_OPTION("rtx", TaauPreset, taauPreset, TaauPreset::Balanced,  "Adjusts TAA-U scaling factor, trades quality for performance.");
-    RTX_OPTION_ENV("rtx", GraphicsPreset, graphicsPreset, GraphicsPreset::Auto, "DXVK_GRAPHICS_PRESET_TYPE", "Overall rendering preset, higher presets result in higher image quality, lower presets result in better performance.");
+    static void graphicsPresetOnChange(DxvkDevice* device);
+    RTX_OPTION_ARGS("rtx", GraphicsPreset, graphicsPreset, GraphicsPreset::Auto, "Overall rendering preset, higher presets result in higher image quality, lower presets result in better performance.",
+                    args.environment = "DXVK_GRAPHICS_PRESET_TYPE",
+                    args.onChangeCallback = &graphicsPresetOnChange);
     RTX_OPTION_ENV("rtx", RaytraceModePreset, raytraceModePreset, RaytraceModePreset::Auto, "DXVK_RAYTRACE_MODE_PRESET_TYPE", "");
     RTX_OPTION_FLAG("rtx", bool, lowMemoryGpu, false, RtxOptionFlags::NoSave, "Enables low memory mode, where we aggressively detune caches and streaming systems to accomodate the lower memory available.");
     RTX_OPTION("rtx", float, emissiveIntensity, 1.0f, "A general scale factor on all emissive intensity values globally. Generally per-material emissive intensities should be used, but this option may be useful for debugging without needing to author materials.");
@@ -473,11 +476,11 @@ namespace dxvk {
                     args.flags = RtxOptionFlags::NoSave | RtxOptionFlags::NoReset);
     RTX_OPTION_ARGS("rtx", bool, defaultToAdvancedUI, false, "", args.flags = RtxOptionFlags::NoReset);
 
-    public: static void showUICursorOnChange();
+    public: static void showUICursorOnChange(DxvkDevice* device);
     RTX_OPTION_ARGS("rtx", bool, showUICursor, true, "If true, the ImGUI mouse cursor will be shown when the UI is active.\n"
                     "Can be toggled with Alt + Delete.", args.onChangeCallback = &showUICursorOnChange);
     
-    public: static void blockInputToGameInUIOnChange();
+    public: static void blockInputToGameInUIOnChange(DxvkDevice* device);
     RTX_OPTION_ARGS("rtx", bool, blockInputToGameInUI, true,
                     "If true, input will not be passed to the game when the UI is active.\n"
                     "Can be toggled with Alt + Backspace", args.onChangeCallback = &blockInputToGameInUIOnChange, args.flags = RtxOptionFlags::NoSave);
@@ -571,7 +574,7 @@ namespace dxvk {
         friend class ImGUI;
         friend class RtxOptions;
         RTX_OPTION_ENV("rtx.antiCulling.light", bool, enable, false, "RTX_ANTI_CULLING_LIGHTS", "Enable Anti-Culling for lights.");
-        RTX_OPTION("rtx.antiCulling.light", uint32_t, numLightsToKeep, 1000, "Maximum number of lights to keep when Anti-Culling is enabled.");
+        RTX_OPTION("rtx.antiCulling.light", uint32_t, numLightsToKeep, 1000, "(DEPRECATED)");
         RTX_OPTION("rtx.antiCulling.light", uint32_t, numFramesToExtendLightLifetime, 1000, "Maximum number of frames to keep  when Anti-Culling is enabled. Make sure not to set this too low (then the anti-culling won't work), nor too high (which will hurt the performance).");
         RTX_OPTION("rtx.antiCulling.light", float, fovScale, 1.0f, "Scalar of the FOV of lights Anti-Culling Frustum.");
       };
@@ -909,7 +912,7 @@ namespace dxvk {
     // Store the computed value separately from the user preference.  This enables changing it immediately when needed,
     // and lets us store the final value to be used by the game.
     public: inline static EnableVsync enableVsyncState = EnableVsync::WaitingForImplicitSwapchain;
-    public: static void EnableVsyncOnChange() {
+    public: static void EnableVsyncOnChange(DxvkDevice* device) {
       if (enableVsync() != EnableVsync::WaitingForImplicitSwapchain) {
         enableVsyncState = enableVsync();
       }
@@ -1249,7 +1252,8 @@ namespace dxvk {
       decalTextures.setDeferred(mergedSet);
 
       // Ensure all of the above values are promoted before the first frame starts.
-      RtxOption<bool>::applyPendingValues();
+      // DxvkDevice hasn't been created yet, so pass nullptr here.
+      RtxOption<bool>::applyPendingValues(nullptr);
     }
 
     static void updateUpscalerFromDlssPreset();

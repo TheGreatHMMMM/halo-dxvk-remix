@@ -55,13 +55,14 @@ enum class RtComponentPropertyType {
   Int32,
   Uint32,
   Uint64,
+  String,
+  AssetPath,
 
   // Default Value is ignored for relationships. It's safe to just use 0.
   Prim,
 
   // TODO should we support lists of any of the above types.
   // TODO should Hash be a separate type? it's just uint64_t under the hood, but could be displayed differently.
-  // TODO should we support strings? asset paths?
   // TODO support generic types (i.e. number, or numbersAndVectors)
 
   // NOTE: Places to change when adding a new case:
@@ -70,6 +71,8 @@ enum class RtComponentPropertyType {
   //   `RtComponentPropertyTypeToCppType` in rtx_graph_types.h.
   //   `RtComponentPropertyValue` variant in rtx_graph_types.h,
   //   `RtComponentPropertyVector` variant in rtx_graph_types.h,
+  //   `GraphUsdParser::getPropertyValue` in rtx_graph_usd_parser.cpp
+  //   `TestComponent` in test_component.h, and the unit tests it is used in.
 };
 std::ostream& operator << (std::ostream& os, RtComponentPropertyType e);
 
@@ -87,6 +90,8 @@ template<> struct RtComponentPropertyTypeToCppTypeImpl<RtComponentPropertyType::
 template<> struct RtComponentPropertyTypeToCppTypeImpl<RtComponentPropertyType::Uint32> { using Type = uint32_t; };
 template<> struct RtComponentPropertyTypeToCppTypeImpl<RtComponentPropertyType::Uint64> { using Type = uint64_t; };
 template<> struct RtComponentPropertyTypeToCppTypeImpl<RtComponentPropertyType::Prim> { using Type = uint32_t; };
+template<> struct RtComponentPropertyTypeToCppTypeImpl<RtComponentPropertyType::String> { using Type = std::string; };
+template<> struct RtComponentPropertyTypeToCppTypeImpl<RtComponentPropertyType::AssetPath> { using Type = std::string; };
 
 template< RtComponentPropertyType propertyType >
 using RtComponentPropertyTypeToCppType = typename RtComponentPropertyTypeToCppTypeImpl<propertyType>::Type;
@@ -106,7 +111,8 @@ using RtComponentPropertyValue = std::variant<
   Vector4,
   int32_t,
   uint32_t,
-  uint64_t
+  uint64_t,
+  std::string
 >;
 
 using RtComponentPropertyVector = std::variant<
@@ -118,7 +124,8 @@ using RtComponentPropertyVector = std::variant<
   std::vector<Vector4>,
   std::vector<int32_t>,
   std::vector<uint32_t>,
-  std::vector<uint64_t>
+  std::vector<uint64_t>,
+  std::vector<std::string>
 >;
 
 RtComponentPropertyValue propertyValueFromString(const std::string& str, const RtComponentPropertyType type);
@@ -145,6 +152,8 @@ using RtComponentType = XXH64_hash_t;
 static const RtComponentType kInvalidComponentType = kEmptyHash;
 
 struct RtComponentPropertySpec {
+  static inline const std::string kUsdNamePrefix = "lightspeed.trex.components.";
+  
   RtComponentPropertyType type;
   RtComponentPropertyValue defaultValue;
   RtComponentPropertyIOType ioType;
@@ -158,10 +167,18 @@ struct RtComponentPropertySpec {
   // To set optional values when using the macros, write them as a comma separated list after the docString. 
   // `property.<name> = <value>`, i.e. `property.minValue = 0.0f, property.maxValue = 1.0f`
 
+  // If this property has been renamed, list the old `usdPropertyName`s here for backwards compatibility.
+  // If multiple definitions for the same property exist, the property on the strongest USD layer will be used.
+  // If multiple definitions for the same property exist on a single layer, `name` will be used first,
+  // followed by the earliest name in `oldUsdNames`.  So the ideal order should be:
+  // property.oldUsdNames = { "thirdName", "secondName", "originalName" }
+  std::vector<std::string> oldUsdNames;
+
   // NOTE: These are currently unenforced on the c++ side, but should be used for OGN generation.
   // TODO: consider enforcing these on the c++ side (between component batch updates?)
   RtComponentPropertyValue minValue = false;
   RtComponentPropertyValue maxValue = false;
+
 
   // Whether the component will function without this property being set.
   // Runtime side all properties have a default value, so this is mostly a UI hint.
@@ -205,6 +222,8 @@ struct RtComponentSpec {
   // Optional functions for component batches.  Set these by adding a lambda to the end of the component definition macro:
   // `spec.applySceneOverrides = [](...) { ... }`
 
+  // If this component has been renamed, list the old `name`s here for backwards compatibility.
+  std::vector<std::string> oldNames;
 
   // Optional function intended for applying values in the graph to renderable objects.  This is called near the top of SceneManager::prepareSceneData.
   std::function<void(const Rc<DxvkContext>& context, RtComponentBatch& batch, const size_t start, const size_t end)> applySceneOverrides;

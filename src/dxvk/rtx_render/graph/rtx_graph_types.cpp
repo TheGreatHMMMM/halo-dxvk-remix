@@ -143,14 +143,25 @@ void registerComponentSpec(const RtComponentSpec* spec) {
 
   std::lock_guard<std::mutex> lock(getComponentSpecMapMutex());
 
-  // Check for duplicate registration
-  auto existing = getComponentSpecMap().find(spec->componentType);
-  if (existing != getComponentSpecMap().end()) {
-    Logger::err(str::format("Component spec for type ", spec->name, " already registered. Conflicting component spec: ", existing->second->name));
+  // Check for duplicate registration and insert
+  auto [iterator, wasInserted] = getComponentSpecMap().insert({spec->componentType, spec});
+  if (!wasInserted) {
+    Logger::err(str::format("Component spec for type ", spec->name, " already registered. Conflicting component spec: ", iterator->second->name));
     assert(false && "Multiple component specs mapped to a single ComponentType.");
   }
 
-  getComponentSpecMap()[spec->componentType] = spec;
+  if (!spec->oldNames.empty()) {
+    for (const auto& oldName : spec->oldNames) {
+      std::string fullOldName = RtComponentPropertySpec::kUsdNamePrefix + oldName;
+      RtComponentType oldType = XXH3_64bits(fullOldName.c_str(), fullOldName.size());
+      auto [oldIterator, oldWasInserted] = getComponentSpecMap().insert({oldType, spec});
+      if (!oldWasInserted) {
+        Logger::err(str::format("Component spec for legacy type name ", fullOldName, " already registered. Conflicting component spec: ", oldIterator->second->name));
+        assert(false && "Multiple component specs mapped to a single ComponentType.");
+      }
+    }
+  }
+
 }
 
 const RtComponentSpec* getComponentSpec(const RtComponentType& componentType) {
@@ -209,6 +220,8 @@ std::ostream& operator << (std::ostream& os, RtComponentPropertyType type) {
     case RtComponentPropertyType::Uint32: return os << "Uint32";
     case RtComponentPropertyType::Uint64: return os << "Uint64";
     case RtComponentPropertyType::Prim: return os << "Prim";
+    case RtComponentPropertyType::String: return os << "String";
+    case RtComponentPropertyType::AssetPath: return os << "AssetPath";
   }
   return os << static_cast<int32_t>(type);
 }
@@ -244,6 +257,9 @@ RtComponentPropertyValue propertyValueFromString(const std::string& str, const R
     return propertyValueForceType<uint64_t>(std::stoull(str));
   case RtComponentPropertyType::Prim:
     return propertyValueForceType<uint32_t>(std::stoull(str));
+  case RtComponentPropertyType::String:
+  case RtComponentPropertyType::AssetPath:
+    return str;
   }
   Logger::err(str::format("Unknown property type in propertyValueFromString.  type: ", type, ", string: ", str));
   assert(false && "Unknown property type in propertyValueFromString");
@@ -268,6 +284,8 @@ RtComponentPropertyVector propertyVectorFromType(const RtComponentPropertyType t
   case RtComponentPropertyType::Uint32: return std::vector<RtComponentPropertyTypeToCppType<RtComponentPropertyType::Uint32>>{};
   case RtComponentPropertyType::Uint64: return std::vector<RtComponentPropertyTypeToCppType<RtComponentPropertyType::Uint64>>{};
   case RtComponentPropertyType::Prim:   return std::vector<RtComponentPropertyTypeToCppType<RtComponentPropertyType::Prim>>{};
+  case RtComponentPropertyType::String: return std::vector<std::string>{};
+  case RtComponentPropertyType::AssetPath: return std::vector<std::string>{};
   }
   assert(false && "Unknown property type in propertyVectorFromType");
   return std::vector<RtComponentPropertyTypeToCppType<RtComponentPropertyType::Float>>{}; // fallback
