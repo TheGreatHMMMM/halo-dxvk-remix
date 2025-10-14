@@ -376,7 +376,8 @@ namespace dxvk {
 
     // When games use vertex shaders, the object to world transforms can be unreliable, and so we can ignore them.
     const bool useObjectToWorldTransform = !m_parent->UseProgrammableVS() || (m_parent->UseProgrammableVS() && useVertexCapture() && useWorldMatricesForShaders());
-    transformData.objectToWorld = useObjectToWorldTransform ? d3d9State().transforms[GetTransformIndex(D3DTS_WORLD)] : Matrix4();
+    // transformData.objectToWorld = useObjectToWorldTransform ? d3d9State().transforms[GetTransformIndex(D3DTS_WORLD)] : Matrix4();
+    transformData.objectToWorld = d3d9State().transforms[GetTransformIndex(D3DTS_WORLD)];
 
     transformData.worldToView = d3d9State().transforms[GetTransformIndex(D3DTS_VIEW)];
     transformData.viewToProjection = d3d9State().transforms[GetTransformIndex(D3DTS_PROJECTION)];
