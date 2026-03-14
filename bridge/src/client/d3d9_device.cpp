@@ -3810,9 +3810,9 @@ void Direct3DDevice9Ex_LSS<EnableSync>::initImplicitSwapchain(const D3DPRESENT_P
   m_pSwapchain = pLssSwapChain;
   m_pSwapchain->reset(presParam);
   {
-    gSwapChainMapMutex.lock();
-    gSwapChainMap[m_pSwapchain->getPresentationParameters().hDeviceWindow] = { m_pSwapchain->getPresentationParameters(), this->getCreateParams(),  m_pSwapchain->getId()};
-    gSwapChainMapMutex.unlock();
+    //gSwapChainMapMutex.lock();
+    //gSwapChainMap[m_pSwapchain->getPresentationParameters().hDeviceWindow] = { m_pSwapchain->getPresentationParameters(), this->getCreateParams(),  m_pSwapchain->getId()};
+    //gSwapChainMapMutex.unlock();
   }
 
   m_implicitRefCnt++;
