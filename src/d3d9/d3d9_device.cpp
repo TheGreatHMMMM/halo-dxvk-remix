@@ -2851,7 +2851,7 @@ namespace dxvk {
     ScopedCpuProfileZone();
     D3D9DeviceLock lock = LockDevice();
 
-    if (unlikely(pDestBuffer == nullptr || pVertexDecl == nullptr))
+    if (unlikely(pDestBuffer == nullptr))
       return D3DERR_INVALIDCALL;
 
     if (!SupportsSWVP()) {
