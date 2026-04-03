@@ -90,8 +90,9 @@ namespace dxvk {
       * \param [in] idx: index of transform
       */
     void SetTransformDirty(const uint32_t transformIdx) {
-      if (transformIdx > GetTransformIndex(D3DTS_WORLD)) {
-        m_maxBone = std::max(m_maxBone, transformIdx - GetTransformIndex(D3DTS_WORLD));
+      const uint32_t boneBase = GetTransformIndex(D3DTS_WORLDMATRIX(0));
+      if (transformIdx >= boneBase) {
+        m_maxBone = std::max(m_maxBone, transformIdx - boneBase);
       }
     }
 
