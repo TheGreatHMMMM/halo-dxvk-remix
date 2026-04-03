@@ -1232,6 +1232,7 @@ namespace dxvk {
     m_seenCameraPositionsPrev = std::move(m_seenCameraPositions);
 
     m_stagedBonesCount = 0;
+    m_maxBone = 0;
   }
 
   void D3D9Rtx::OnPresent(const Rc<DxvkImage>& targetImage) {
