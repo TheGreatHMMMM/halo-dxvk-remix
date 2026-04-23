@@ -503,6 +503,11 @@ struct GeometryBufferData {
         texcoordStride = geometryData.texcoordBuffer.stride() / texcoordSubElementSize;
         texcoordData = (float*) geometryData.texcoordBuffer.mapPtr((size_t) geometryData.texcoordBuffer.offsetFromSlice());
       }
+      else if (texFmt == VK_FORMAT_R8G8B8A8_USCALED) {
+        constexpr size_t texcoordSubElementSize = sizeof(uint32_t);
+        texcoordStride = geometryData.texcoordBuffer.stride() / texcoordSubElementSize;
+        texcoordData = (float*) geometryData.texcoordBuffer.mapPtr((size_t) geometryData.texcoordBuffer.offsetFromSlice());
+      }
     }
 
     if (geometryData.normalBuffer.defined()) {

@@ -42,6 +42,7 @@ namespace interleaver {
 
   enum SupportedVkFormats : uint32_t {
     VK_FORMAT_R8G8B8A8_UNORM = 37,
+    VK_FORMAT_R8G8B8A8_USCALED = 39,
     VK_FORMAT_A2B10G10R10_SNORM_PACK32 = 65,
 
     // Passthrough format mapping
@@ -59,6 +60,7 @@ namespace interleaver {
     case SupportedVkFormats::VK_FORMAT_R32G32B32_SFLOAT:
     case SupportedVkFormats::VK_FORMAT_R32G32B32A32_SFLOAT:
     case SupportedVkFormats::VK_FORMAT_R8G8B8A8_UNORM:
+    case SupportedVkFormats::VK_FORMAT_R8G8B8A8_USCALED:
     case SupportedVkFormats::VK_FORMAT_A2B10G10R10_SNORM_PACK32:
       return true;
     default:
@@ -97,6 +99,15 @@ namespace interleaver {
       float g = unorm8ToF32(uint8_t((data >> 8) & 0xFF));
       float r = unorm8ToF32(uint8_t((data >> 0) & 0xFF));
       return float3(r, g, b) * 2.f - 1.f;
+    }
+    case SupportedVkFormats::VK_FORMAT_R8G8B8A8_USCALED:
+    {
+      //HaloCE UV format. Originally D3DDECLTYPE_D3DCOLOR, it was using BGRA and passing U as R and V as G
+      //I've hacked this to use D3DDECLTYPE_UBYTE4, and here we are grabbing byte 2 as U and byte 1 as V
+      uint data = asuint(input[index]);
+      float u = unorm8ToF32(uint8_t((data >> 16) & 0xFF));
+      float v = unorm8ToF32(uint8_t((data >> 8) & 0xFF));
+      return float3(u, v, 0);
     }
     case SupportedVkFormats::VK_FORMAT_A2B10G10R10_SNORM_PACK32:
     {
