@@ -19,6 +19,15 @@
 * FROM, OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER
 * DEALINGS IN THE SOFTWARE.
 */
+
+//!variant rtxdi_temporal_reuse.comp
+//!>       RTXDI_NO_PORTALS=0
+
+//!variant rtxdi_temporal_reuse_no_portals.comp
+//!>       RTXDI_NO_PORTALS=1
+
+//!end-variants
+
 #define USE_32BIT_RAY_DIRECTION 1
 #define RAB_HAS_PREVIOUS_GBUFFER 1
 #define RAB_HAS_CURRENT_GBUFFER 1
@@ -67,7 +76,11 @@ void main(int2 thread_id : SV_DispatchThreadID)
     uint2 previousBestLight = RtxdiBestLights[prevPixelCenter / RTXDI_GRAD_FACTOR];
 
     // Map the previous light index to the current frame, make sure the portal still exists if that light was a cross-portal one
+#if RTXDI_NO_PORTALS
+    if (previousBestLight.x != RTXDI_INVALID_LIGHT_INDEX && previousBestLight.y == RTXDI_INVALID_PORTAL_INDEX)
+#else
     if (previousBestLight.x != RTXDI_INVALID_LIGHT_INDEX && (previousBestLight.y == RTXDI_INVALID_PORTAL_INDEX || previousBestLight.y < cb.numActiveRayPortals))
+#endif
     {
       previousBestLightIndex = RAB_TranslateLightIndex(previousBestLight.x, /* currentToPrevious = */ false);
       previousBestLightPortalIdx = previousBestLight.y;
@@ -75,17 +88,12 @@ void main(int2 thread_id : SV_DispatchThreadID)
   }
 
 
-  RTXDI_Reservoir state = RTXDI_EmptyReservoir();
+  RTXDI_Reservoir state = RAB_LoadReservoir(thread_id, RTXDI_GetTemporalOutputPage());
   if (cb.lightCount != 0)
   {
-    RTXDI_SampleRandomLights(state, rng, surface, previousBestLightIndex, previousBestLightPortalIdx, cb.enableRtxdiInitialVisibility);
-
-    RTXDI_Reservoir bestLightReservoir = RTXDI_SampleSingleLight(rng, surface, previousBestLightIndex, previousBestLightPortalIdx, cb.enableRtxdiInitialVisibility);
-    float random = RAB_GetNextRandom(rng);
-    RTXDI_CombineReservoirs(state, bestLightReservoir, random, bestLightReservoir.targetPdf);
-    
-    // Note: I have NO IDEA why this works, but it's necessary to get unbiased results with best light sampling.
-    state.M = 1;
+    RTXDI_SkipRandomLightsRng(rng);
+    RTXDI_SkipSingleLightRng(rng, previousBestLightIndex);
+    RAB_SkipRandoms(rng, 1);
   }
 
   const float3 virtualMotionVector = PrimaryVirtualMotionVector[thread_id].xyz;
@@ -109,7 +117,11 @@ void main(int2 thread_id : SV_DispatchThreadID)
   tparams.discardEnlargedPixels = cb.enableRtxdiDiscardEnlargedPixels;
   tparams.discardInvisibleSamples = cb.enableRtxdiDiscardInvisibleSamples;
   tparams.enablePermutationSampling = cb.enableRtxdiPermutationSampling;
+#if RTXDI_NO_PORTALS
+  tparams.enableCrossPortalReuse = false;
+#else
   tparams.enableCrossPortalReuse = cb.teleportationPortalIndex != 0;
+#endif
   tparams.uniformRandomNumber = cb.uniformRandomNumber;
 
   int2 temporalSamplePixelPos;

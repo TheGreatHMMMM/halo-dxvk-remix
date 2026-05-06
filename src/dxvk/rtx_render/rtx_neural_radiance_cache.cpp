@@ -126,8 +126,8 @@ namespace dxvk {
 
         RW_TEXTURE2D(NRC_RESOLVE_BINDING_DEBUG_VIEW_TEXTURE_OUTPUT)
         RW_STRUCTURED_BUFFER(NRC_RESOLVE_BINDING_GPU_PRINT_BUFFER_OUTPUT)
-        END_PARAMETER()
-      };
+     END_PARAMETER()
+    };
 
     PREWARM_SHADER_PIPELINE(NrcResolveShader);
   }
@@ -285,6 +285,7 @@ namespace dxvk {
 
       RemixGui::Checkbox("Learn Irradiance", &NrcOptions::learnIrradianceObject());
       RemixGui::Checkbox("Include Direct Lighting", &NrcOptions::includeDirectLightingObject());
+      RemixGui::Checkbox("Boost Emissives", &NrcOptions::boostEmissivesObject());
       
       RemixGui::DragInt("Max Number of Training Iterations", &NrcOptions::maxNumTrainingIterationsObject(), 1.f, 1, 16, "%d", ImGuiSliderFlags_AlwaysClamp);
       RemixGui::DragInt("Target Number of Training Iterations", &NrcOptions::targetNumTrainingIterationsObject(), 1.f, 1, 16, "%d", ImGuiSliderFlags_AlwaysClamp);
@@ -488,6 +489,8 @@ namespace dxvk {
     }
 
     nrcArgs.trainingLuminanceClamp = NrcOptions::luminanceClampMultiplier() * NrcOptions::maxExpectedAverageRadianceValue();
+
+    nrcArgs.boostEmissives = NrcOptions::boostEmissives();
   }
 
   const Vector2& NeuralRadianceCache::getNumQueryPixelsPerTrainingPixel() const {
@@ -1099,7 +1102,8 @@ namespace dxvk {
       m_nrcCtxSettings->frameDimensions.x,
       m_nrcCtxSettings->frameDimensions.y,
       1 };
-    VkExtent3D workgroups = util::computeBlockCount(numRaysExtent, VkExtent3D { 16, 8, 1 });
+    VkExtent3D workgroups = util::computeBlockCount(numRaysExtent, VkExtent3D { NRC_RESOLVE_THREADS_DISPATCH_WIDTH, NRC_RESOLVE_THREADS_DISPATCH_HEIGHT, 1 });
+
 
     ctx.bindShader(VK_SHADER_STAGE_COMPUTE_BIT, NrcResolveShader::getShader());
     ctx.dispatch(workgroups.width, workgroups.height, workgroups.depth);
