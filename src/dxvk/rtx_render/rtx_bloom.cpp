@@ -125,7 +125,8 @@ namespace dxvk {
       dispatchUpsampleStep(ctx, linearSampler, *res[i], *res[i - 1]);
     }
 
-    dispatchComposite(ctx, linearSampler, inOutColorBuffer, m_bloomBuffer[0]);
+    // Bloom is composited into the scene by the tonemapping pass
+    // (sceneColor * exposure + bloom) so the composite step is skipped here.
   }
 
   void DxvkBloom::dispatchDownsampleStep(

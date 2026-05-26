@@ -35,6 +35,7 @@
 #define TONEMAPPING_APPLY_TONEMAPPING_COLOR_INPUT          1
 #define TONEMAPPING_APPLY_TONEMAPPING_EXPOSURE_INPUT       2
 #define TONEMAPPING_APPLY_TONEMAPPING_COLOR_OUTPUT         3
+#define TONEMAPPING_APPLY_BLOOM_INPUT                      4
 
 #define EXPOSURE_HISTOGRAM_SIZE                           256
 
@@ -101,7 +102,7 @@ struct ToneMappingApplyToneMappingArgs {
   // Color grading scalars (16 bytes).
   float contrast;
   float saturation;
-  float pad0;
+  float bloomIntensity;      // Pre-scaled bloom intensity; 0 when bloom is disabled.
   float pad1;
 
   // Color grading tint (16 bytes).
