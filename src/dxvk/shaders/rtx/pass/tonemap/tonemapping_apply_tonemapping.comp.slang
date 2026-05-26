@@ -37,6 +37,9 @@ RWTexture1D<float> InExposure;
 [[vk::binding(TONEMAPPING_APPLY_TONEMAPPING_COLOR_OUTPUT)]]
 RWTexture2D<float4> OutColorBuffer;
 
+[[vk::binding(TONEMAPPING_APPLY_BLOOM_INPUT)]]
+Sampler2D InBloom;
+
 layout(push_constant)
 ConstantBuffer<ToneMappingApplyToneMappingArgs> cb;
 
@@ -55,9 +58,10 @@ float3 colorGrading(float3 inputColor)
   return inputColor;
 }
 
-float3 applyToneMapping(float3 color, uint2 pixelPosition)
+float3 applyToneMapping(float3 color, uint2 pixelPosition, float2 uv)
 {
-  color *= getExposure(InExposure, cb.enableAutoExposure, cb.exposureFactor);
+  float exposure = getExposure(InExposure, cb.enableAutoExposure, cb.exposureFactor);
+  color = color * exposure + InBloom.SampleLevel(uv, 0).rgb * cb.bloomIntensity;
 
   if (cb.toneMappingEnabled != 0)
   {
@@ -122,7 +126,11 @@ void main(uint2 threadId : SV_DispatchThreadID)
 {
   float3 inputColor = imageLoad(InColorBuffer, threadId).xyz;
 
-  float3 outputColor = applyToneMapping(inputColor, threadId);
+  uint outputWidth, outputHeight;
+  OutColorBuffer.GetDimensions(outputWidth, outputHeight);
+  float2 uv = (float2(threadId) + 0.5f) / float2(outputWidth, outputHeight);
+
+  float3 outputColor = applyToneMapping(inputColor, threadId, uv);
 
   // Clamp outputColor to avoid problems with NIS.
   outputColor = saturate(outputColor);

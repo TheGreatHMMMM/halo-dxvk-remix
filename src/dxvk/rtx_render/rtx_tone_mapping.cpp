@@ -47,6 +47,7 @@ namespace dxvk {
         RW_TEXTURE2D(TONEMAPPING_APPLY_TONEMAPPING_COLOR_INPUT)
         RW_TEXTURE1D_READONLY(TONEMAPPING_APPLY_TONEMAPPING_EXPOSURE_INPUT)
         RW_TEXTURE2D(TONEMAPPING_APPLY_TONEMAPPING_COLOR_OUTPUT)
+        SAMPLER2D(TONEMAPPING_APPLY_BLOOM_INPUT)
       END_PARAMETER()
     };
 
@@ -89,7 +90,9 @@ namespace dxvk {
     const Resources::Resource& inputBuffer,
     const Resources::Resource& colorBuffer,
     bool performSRGBConversion,
-    bool autoExposureEnabled) {
+    bool autoExposureEnabled,
+    Rc<DxvkImageView> bloomView,
+    float bloomIntensity) {
 
     ScopedGpuProfileZone(ctx, "Apply Tone Mapping");
 
@@ -102,6 +105,7 @@ namespace dxvk {
     pushArgs.performSRGBConversion = performSRGBConversion;
     pushArgs.enableAutoExposure    = autoExposureEnabled;
     pushArgs.exposureFactor        = exp2f(exposureBias()); // ev100
+    pushArgs.bloomIntensity        = bloomIntensity;
 
     fork_hooks::populateTonemapOperatorArgs(pushArgs);
 
@@ -122,6 +126,8 @@ namespace dxvk {
     ctx->bindResourceView(TONEMAPPING_APPLY_TONEMAPPING_COLOR_INPUT, inputBuffer.view, nullptr);
     ctx->bindResourceView(TONEMAPPING_APPLY_TONEMAPPING_EXPOSURE_INPUT, exposureView, nullptr);
     ctx->bindResourceView(TONEMAPPING_APPLY_TONEMAPPING_COLOR_OUTPUT, colorBuffer.view, nullptr);
+    ctx->bindResourceView(TONEMAPPING_APPLY_BLOOM_INPUT, bloomView, nullptr);
+    ctx->bindResourceSampler(TONEMAPPING_APPLY_BLOOM_INPUT, ctx->getResourceManager().getSampler(VK_FILTER_LINEAR, VK_SAMPLER_MIPMAP_MODE_NEAREST, VK_SAMPLER_ADDRESS_MODE_CLAMP_TO_EDGE));
     ctx->bindShader(VK_SHADER_STAGE_COMPUTE_BIT, ApplyTonemappingShader::getShader());
     ctx->pushConstants(0, sizeof(pushArgs), &pushArgs);
     ctx->dispatch(workgroups.width, workgroups.height, workgroups.depth);
@@ -132,7 +138,9 @@ namespace dxvk {
     Rc<DxvkImageView> exposureView,
     const Resources::RaytracingOutput& rtOutput,
     bool performSRGBConversion,
-    bool autoExposureEnabled) {
+    bool autoExposureEnabled,
+    Rc<DxvkImageView> bloomView,
+    float bloomIntensity) {
 
     ScopedGpuProfileZone(ctx, "Tone Mapping");
 
@@ -141,6 +149,7 @@ namespace dxvk {
     const Resources::Resource& inputColorBuffer = rtOutput.m_finalOutput.resource(Resources::AccessType::Read);
     dispatchApplyToneMapping(ctx, exposureView, inputColorBuffer,
                              rtOutput.m_finalOutput.resource(Resources::AccessType::Write),
-                             performSRGBConversion, autoExposureEnabled);
+                             performSRGBConversion, autoExposureEnabled,
+                             bloomView, bloomIntensity);
   }
 }

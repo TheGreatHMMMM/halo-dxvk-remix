@@ -1772,9 +1772,18 @@ namespace dxvk {
     // Operator-only tonemapping (dynamic tone curve removed in the 2026-05-13 refactor).
     {
       DxvkToneMapping& toneMapper = m_common->metaToneMapping();
+      DxvkBloom& bloom = m_common->metaBloom();
+      const bool bloomActive = bloom.isActive();
+      // When bloom is inactive bind the scene colour itself as a valid dummy
+      // for the bloom sampler slot; bloomIntensity=0 ensures it contributes nothing.
+      Rc<DxvkImageView> bloomView = bloomActive
+        ? bloom.getBloomBuffer().view
+        : rtOutput.m_finalOutput.resource(Resources::AccessType::Read).view;
       toneMapper.dispatch(this,
         autoExposure.getExposureTexture().view,
-        rtOutput, performSRGBConversion, autoExposure.enabled());
+        rtOutput, performSRGBConversion, autoExposure.enabled(),
+        bloomView,
+        bloomActive ? bloom.getBloomIntensity() : 0.0f);
     }
   }
 

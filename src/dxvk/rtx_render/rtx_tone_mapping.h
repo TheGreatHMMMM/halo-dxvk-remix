@@ -48,7 +48,9 @@ namespace dxvk {
       Rc<DxvkImageView> exposureView,
       const Resources::RaytracingOutput& rtOutput,
       bool performSRGBConversion = true,
-      bool autoExposureEnabled = true);
+      bool autoExposureEnabled = true,
+      Rc<DxvkImageView> bloomView = nullptr,
+      float bloomIntensity = 0.0f);
 
     bool isEnabled() const { return tonemappingEnabled(); }
 
@@ -61,7 +63,9 @@ namespace dxvk {
       const Resources::Resource& inputBuffer,
       const Resources::Resource& colorBuffer,
       bool performSRGBConversion,
-      bool autoExposureEnabled);
+      bool autoExposureEnabled,
+      Rc<DxvkImageView> bloomView,
+      float bloomIntensity);
 
     Rc<vk::DeviceFn> m_vkd;
 

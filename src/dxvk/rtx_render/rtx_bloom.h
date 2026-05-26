@@ -45,6 +45,9 @@ namespace dxvk {
       Rc<DxvkSampler> linearSampler,
       const Resources::Resource& inOutColorBuffer);
 
+    const Resources::Resource& getBloomBuffer() const { return m_bloomBuffer[0]; }
+    float getBloomIntensity() const { return 0.01f * std::max(burnIntensity(), 0.0f); }
+
     void showImguiSettings();
 
   private:
