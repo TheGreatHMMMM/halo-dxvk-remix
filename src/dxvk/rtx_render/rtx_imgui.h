@@ -417,7 +417,10 @@ namespace RemixGui {
 
       // Remove the corresponding elements in containers
       m_comboEntries.erase(m_comboEntries.begin() + comboIdx);
-      m_keyToComboIdx.erase(it);
+      m_keyToComboIdx.clear();
+      for (int i = 0; i < m_comboEntries.size(); i++) {
+        m_keyToComboIdx[m_comboEntries[i].key] = i;
+      }
     }
 
     void addComboEntry(const ComboEntry& comboEntry) {

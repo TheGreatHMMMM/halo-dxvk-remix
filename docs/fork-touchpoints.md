@@ -236,6 +236,9 @@ check will enforce it if discipline slips.
 - **Inline tweak** at `ImGUI::showRenderingSettings` (SHARC settings tree node) — ~10 LOC (SHARC Stage 5).
   *Adds a collapsing-header "SHARC" tree node inside the path-tracing settings panel, gated on `integrateIndirectMode() == IntegrateIndirectMode::SHARC`. The body calls `metaSharc().showImguiSettings()` to delegate all SHARC-specific controls to `RtxSharc::showImguiSettings` in `rtx_fork_sharc.cpp`.*
 
+- **Inline tweak** at `integrateIndirectModeCombo` SHARC tooltip — 1-line update (SHARC raytrace-mode routing fix).
+  *Clarifies that SHARC uses the RayQuery (RGS) indirect implementation internally instead of requiring the generic Integrate Indirect Raytrace Mode combo to be set to RayQuery (RGS).*
+
 ---
 
 ## src/dxvk/imgui/dxvk_imgui_about.cpp
@@ -558,6 +561,15 @@ initializer list and can't be lifted into a separate TU.
 
 ---
 
+## src/dxvk/rtx_render/rtx_imgui.h
+
+**Category:** inline-tweak
+
+- **Inline tweak** at `RemixGui::ComboWithKey::removeComboEntry` — 3-line update (SHARC Stage 5 fix).
+  *Rebuilds `m_keyToComboIdx` after removing an entry. This keeps later entries such as `IntegrateIndirectMode::SHARC` selectable when the unsupported NRC entry is removed from the indirect-lighting combo.*
+
+---
+
 ## src/dxvk/rtx_render/rtx_options.h
 
 **Pre-refactor fork footprint:** +32 / -0 LOC (audit 2026-04-18)
@@ -611,6 +623,9 @@ initializer list and can't be lifted into a separate TU.
 
 - **Inline tweak** at `IntegrateIndirectMode` enum (`RtxOptions`) — 1-line addition (SHARC Stage 1).
   *Adds `SHARC = 3` as a third mode in the `IntegrateIndirectMode` enum. When selected, the indirect integrator runs the SHARC Update and Query raygen passes instead of ReSTIR GI or NRC. Used by `DxvkPathtracerIntegrateIndirect::dispatch` to branch into SHARC permutations.*
+
+- **Inline tweak** at `integrateIndirectMode` option metadata — 2-line update (SHARC Stage 5 fix).
+  *Documents option value `3: SHARC` and clamps the option to `IntegrateIndirectMode::Count - 1` so config/UI edits can select the fork-added mode explicitly.*
 
 ---
 
@@ -1333,6 +1348,9 @@ namespace block.
 - **Inline tweak** at `showImguiSettings()` (Stage 5 — ImGui polish) — ~100 LOC replacement.
   *Replaces integer SliderInt debug mode with a named Combo (HashGridColor / Occupancy / etc.). Adds `ImGui::SetItemTooltip()` after every control. Adds a greyed-out `shaderBufferInt64Atomics` capability checkbox via `ImGui::BeginDisabled(!supportsInt64Atomics())` so users know whether their GPU supports the lock-free SHARC path.*
 
+- **Inline tweak** at `RtxSharc::isEnabled` / `showImguiSettings` — ~12-line update (SHARC raytrace-mode routing fix).
+  *Stops disabling SHARC for non-RayQueryRayGen generic indirect raytrace modes. The dispatch path always routes SHARC through its RayQuery (RGS) implementation internally, and the ImGui warning now describes that override instead of saying SHARC is disabled.*
+
 - **New method** `supportsInt64Atomics()` (Stage 5) — 3 LOC.
   *Queries `m_device->features().vulkan12Features.shaderBufferInt64Atomics` and returns the result as `bool`. Used by `showImguiSettings()` to conditionally grey out the int64-atomics capability display.*
 
@@ -1349,6 +1367,9 @@ namespace block.
 
 - **Inline tweak** at `RtxSharc` class declaration (Stage 5 — frameIndex + int64) — ~12 LOC.
   *Adds `uint32_t m_framesSinceClear = 0u` private member (frames-since-last-clear counter for `sharcCb.frameIndex` plumbing). Adds public `bool supportsInt64Atomics() const` method declaration (capability check for ImGui greyed checkbox).*
+
+- **Inline tweak** at `RtxSharc` class comments / `rtx.sharc.enable` description — ~4-line update (SHARC raytrace-mode routing fix).
+  *Documents that SHARC ignores the generic integrate-indirect raytrace-mode option and uses its RayQueryRayGen implementation internally while active.*
 
 ---
 
@@ -1654,8 +1675,14 @@ Fork resolution: restore the numerical hemisphere integration in the LUT bake AN
 - **Inline tweak** at `DxvkPathtracerIntegrateIndirect::prewarmShaders` — ~4-line addition (SHARC Stage 3).
   *Precompiles the four SHARC raygen shader variants (update+query × neeCache on/off) during shader prewarm to avoid first-frame stutter.*
 
+- **Inline tweak** at `DxvkPathtracerIntegrateIndirect::logIntegrateIndirectMode` — 3-line addition (SHARC Stage 5 fix).
+  *Adds a log case for `IntegrateIndirectMode::SHARC` so the renderer reports SHARC activation instead of hitting the default/assert path.*
+
 - **Inline tweak** at `DxvkPathtracerIntegrateIndirect::dispatch` (SHARC dispatch block) — ~30 LOC (SHARC Stage 3).
   *When `IntegrateIndirectMode::SHARC` is active: binds `m_sharcHashBuffer`, `m_sharcLockBuffer`, `m_sharcAccumBuffer`, `m_sharcResolvedBuffer` (from `RaytracingOutput`) plus the SHARC constants CB and debug output image, then dispatches the SHARC Update raygen pass (sparse, 1/downscaleFactor² pixels) followed by the SHARC Query raygen pass (full-res) using the selected neeCache×SHARC permutation.*
+
+- **Inline tweak** at `DxvkPathtracerIntegrateIndirect::dispatch` (`sharcEnabled` gate) — 2-line update (SHARC raytrace-mode routing fix).
+  *Removes the requirement that `renderPassIntegrateIndirectRaytraceMode()` already be `RayQueryRayGen`; SHARC now routes through its RayQuery (RGS) Update/Query pipelines internally for every generic indirect raytrace-mode selection.*
 
 ---
 

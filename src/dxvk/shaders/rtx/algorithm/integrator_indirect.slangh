@@ -706,6 +706,23 @@ void integratePathVertex(
 
   const uint materialType = polymorphicSurfaceMaterialInteractionGetTypeHelper(polymorphicSurfaceMaterialInteraction);
 
+  // NV-DXVK start: SHARC integration — match RTXGI update roughness clamp before BRDF sampling
+#if SHARC_UPDATE
+  if (materialType == surfaceMaterialTypeOpaque)
+  {
+    OpaqueSurfaceMaterialInteraction sharcClampedOpaqueSurfaceMaterialInteraction =
+      opaqueSurfaceMaterialInteractionCreate(polymorphicSurfaceMaterialInteraction);
+    sharcClampedOpaqueSurfaceMaterialInteraction.isotropicRoughness =
+      max(sharcCb.roughnessThreshold, sharcClampedOpaqueSurfaceMaterialInteraction.isotropicRoughness);
+    sharcClampedOpaqueSurfaceMaterialInteraction.anisotropicRoughness = max(
+      vec2(sharcCb.roughnessThreshold, sharcCb.roughnessThreshold),
+      sharcClampedOpaqueSurfaceMaterialInteraction.anisotropicRoughness);
+    polymorphicSurfaceMaterialInteraction =
+      polymorphicSurfaceMaterialInteractionCreateInternal(sharcClampedOpaqueSurfaceMaterialInteraction);
+  }
+#endif
+  // NV-DXVK end
+
   // Add Emission
   vec3 emissiveLight = polymorphicSurfaceMaterialInteractionEvalEmissiveRadiance(polymorphicSurfaceMaterialInteraction);
   float lightSelectionPDF = 0.0;
@@ -830,22 +847,6 @@ void integratePathVertex(
     OpaqueSurfaceMaterialInteraction opaqueSurfaceMaterialInteraction = opaqueSurfaceMaterialInteractionCreate(polymorphicSurfaceMaterialInteraction);
     // NV-DXVK end
     // polymorphicSurfaceMaterialInteraction is no longer live since this point.
-
-    // NV-DXVK start: SHARC integration — clamp surface roughness on Update pass so the
-    // cache is filled with paths the Query side will accept. Matches RTXGI 2.7 pattern:
-    //   material.roughness = max(sharcRoughnessThreshold, material.roughness)  // under SHARC_UPDATE
-#if SHARC_UPDATE
-    if (isOpaqueMaterial)
-    {
-      opaqueSurfaceMaterialInteraction.isotropicRoughness =
-        max(sharcCb.roughnessThreshold, opaqueSurfaceMaterialInteraction.isotropicRoughness);
-      // anisotropicRoughness drives GGX sampling/eval; clamp componentwise to match.
-      opaqueSurfaceMaterialInteraction.anisotropicRoughness = max(
-        vec2(sharcCb.roughnessThreshold, sharcCb.roughnessThreshold),
-        opaqueSurfaceMaterialInteraction.anisotropicRoughness);
-    }
-#endif
-    // NV-DXVK end
 
     // NV-DXVK start: SHARC integration — Stage 3 (SharcHitData + roughness gate + optional early-out query)
 #if SHARC_UPDATE || SHARC_QUERY
@@ -1176,7 +1177,7 @@ void integratePathVertex(
 
     // NV-DXVK start: SHARC integration — Stage 3 (SharcUpdateHit: accumulate direct lighting into cache)
 #if SHARC_UPDATE
-    if (isOpaqueMaterial)
+    if (isOpaqueMaterial && pathState.bounceIteration < pathState.pathMaxBounces && any(continuationThroughput != vec3(0.0f)))
     {
       RNG sharcRng = createRNG(pathState.pixelCoordinate, cb.frameIdx,
         pathState.calculateRNGOffset(kRNGOffsetSampleClosestHitShader) + pathState.bounceIteration + 100u);
@@ -1706,7 +1707,13 @@ void integrateIndirectPath(
 #if SHARC_UPDATE || SHARC_QUERY
   {
     SharcInit(pathState.sharcState);
+#if SHARC_QUERY
+    pathState.materialRoughnessPrev = geometryFlags.firstSampledLobeIsSpecular
+      ? calcRoughness(firstHitPerceptualRoughness)
+      : 1.0f;
+#else
     pathState.materialRoughnessPrev = 0.0f;
+#endif
     // SharcParameters are built per-bounce in integratePathVertex from module-level resources.
   }
 #endif

@@ -46,8 +46,8 @@ namespace dxvk {
     ~RtxSharc() = default;
 
     // Returns true when SHARC is meaningfully enabled.
-    // Auto-disables and logs a warning when TraceRay raytrace mode is active
-    // (TraceRay mode does not support inline ray queries required by SHARC).
+    // SHARC always runs through its RayQueryRayGen implementation internally;
+    // the generic integrate-indirect raytrace-mode option is ignored while active.
     bool isEnabled() const;
 
     // ImGui settings panel — wired into the integrate-indirect UI section.
@@ -100,7 +100,7 @@ namespace dxvk {
     RTX_OPTION("rtx.sharc", bool, enable, false,
                "Enables SHARC (Spatially Hashed Radiance Cache) for indirect illumination.\n"
                "When enabled, SHARC replaces ReSTIR GI and NRC as the indirect path.\n"
-               "Requires RayQuery or RayQueryRayGen raytrace mode.\n"
+               "Runs through the RayQueryRayGen indirect implementation internally.\n"
                "Allocates ~176 MiB of GPU memory at capacity 2^22.");
 
     RTX_OPTION("rtx.sharc", int, accumulationFrameNum, 20,

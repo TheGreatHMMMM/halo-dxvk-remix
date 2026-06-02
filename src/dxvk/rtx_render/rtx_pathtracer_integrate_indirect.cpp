@@ -81,6 +81,10 @@
 #include <rtx_shaders/integrate_indirect_rayquery_raygen_neeCache_sharc_query.h>
 #include <rtx_shaders/integrate_indirect_rayquery_raygen_sharc_update.h>
 #include <rtx_shaders/integrate_indirect_rayquery_raygen_sharc_query.h>
+#include <rtx_shaders/integrate_indirect_rayquery_raygen_neeCache_sharc_update_wboit.h>
+#include <rtx_shaders/integrate_indirect_rayquery_raygen_neeCache_sharc_query_wboit.h>
+#include <rtx_shaders/integrate_indirect_rayquery_raygen_sharc_update_wboit.h>
+#include <rtx_shaders/integrate_indirect_rayquery_raygen_sharc_query_wboit.h>
 // NV-DXVK end
 
 
@@ -379,9 +383,9 @@ namespace dxvk {
           case RaytraceMode::RayQueryRayGen:
             pipelineManager.registerRaytracingShaders(getPipelineShaders(true, serEnabled, ommEnabled, useNeeCache, includesPortals, pomEnabled, nrcEnabled, wboitEnabled));
             // NV-DXVK start: SHARC integration — Stage 3 (prewarm SHARC variants)
-            if (!nrcEnabled && !wboitEnabled) {
-              pipelineManager.registerRaytracingShaders(getPipelineShaders(true, serEnabled, ommEnabled, useNeeCache, includesPortals, pomEnabled, false, false, 1));
-              pipelineManager.registerRaytracingShaders(getPipelineShaders(true, serEnabled, ommEnabled, useNeeCache, includesPortals, pomEnabled, false, false, 2));
+            if (!nrcEnabled) {
+              pipelineManager.registerRaytracingShaders(getPipelineShaders(true, serEnabled, ommEnabled, useNeeCache, includesPortals, pomEnabled, false, wboitEnabled, 1));
+              pipelineManager.registerRaytracingShaders(getPipelineShaders(true, serEnabled, ommEnabled, useNeeCache, includesPortals, pomEnabled, false, wboitEnabled, 2));
             }
             // NV-DXVK end
             break;
@@ -413,6 +417,9 @@ namespace dxvk {
         break;
       case IntegrateIndirectMode::NeuralRadianceCache:
         Logger::info("[RTX] Integrate Indirect Mode: Neural Radiance Cache - activated");
+        break;
+      case IntegrateIndirectMode::SHARC:
+        Logger::info("[RTX] Integrate Indirect Mode: SHARC - activated");
         break;
       }
     }
@@ -511,9 +518,7 @@ namespace dxvk {
     // NV-DXVK start: SHARC integration — Stage 3 (bind SHARC buffers + constants)
     RtxSharc& sharc = ctx->getDevice()->getCommon()->metaSharc();
     const bool sharcEnabled = sharc.isEnabled()
-      && !nrc.isActive()
-      && !RtxOptions::wboitEnabled()
-      && RtxOptions::renderPassIntegrateIndirectRaytraceMode() == RaytraceMode::RayQueryRayGen;
+      && !nrc.isActive();
 
     if (sharcEnabled) {
       ctx->bindResourceBuffer(INTEGRATE_INDIRECT_BINDING_SHARC_HASH_ENTRIES,
@@ -556,7 +561,7 @@ namespace dxvk {
       const VkExtent3D workgroups = util::computeBlockCount(rayDims, VkExtent3D { 16, 8, 1 });
 
       // NV-DXVK start: SHARC integration — Stage 3 (Update → Resolve → Query dispatch order)
-      if (sharcEnabled && RtxOptions::renderPassIntegrateIndirectRaytraceMode() == RaytraceMode::RayQueryRayGen) {
+      if (sharcEnabled) {
         const uint32_t N = sharc.getDownscaleFactor();
         const VkExtent3D updateDims = { (rayDims.width + N - 1) / N, (rayDims.height + N - 1) / N, 1u };
 
@@ -570,7 +575,7 @@ namespace dxvk {
           // 1. Update pass — fills accumulationBuffer with direct+emissive at each bounce
           {
             ScopedGpuProfileZone(ctx, "SHARC Update");
-            ctx->bindRaytracingPipelineShaders(getPipelineShaders(true, serEnabled, ommEnabled, neeCacheEnabled, includePortals, pomEnabled, false, false, 1));
+            ctx->bindRaytracingPipelineShaders(getPipelineShaders(true, serEnabled, ommEnabled, neeCacheEnabled, includePortals, pomEnabled, false, wboitEnabled, 1));
             ctx->traceRays(updateDims.width, updateDims.height, 1);
           }
 
@@ -589,7 +594,7 @@ namespace dxvk {
         // 5. Query pass — normal indirect integration that may early-out via SHARC cache
         {
           ScopedGpuProfileZone(ctx, "SHARC Query");
-          ctx->bindRaytracingPipelineShaders(getPipelineShaders(true, serEnabled, ommEnabled, neeCacheEnabled, includePortals, pomEnabled, false, false, 2));
+          ctx->bindRaytracingPipelineShaders(getPipelineShaders(true, serEnabled, ommEnabled, neeCacheEnabled, includePortals, pomEnabled, false, wboitEnabled, 2));
           ctx->traceRays(rayDims.width, rayDims.height, rayDims.depth);
         }
       } else {
@@ -706,18 +711,34 @@ namespace dxvk {
 
     DxvkRaytracingPipelineShaders shaders;
     // NV-DXVK start: SHARC integration — Stage 3
-    if (sharcMode != 0 && useRayQuery && !nrcEnabled && !wboitEnabled) {
+    if (sharcMode != 0 && useRayQuery && !nrcEnabled) {
       if (sharcMode == 1) { // Update
         if (useNeeCache) {
-          shaders.addGeneralShader(GET_SHADER_VARIANT(VK_SHADER_STAGE_RAYGEN_BIT_KHR, IntegrateIndirectRayGenShader, integrate_indirect_rayquery_raygen_neeCache_sharc_update));
+          if (wboitEnabled) {
+            shaders.addGeneralShader(GET_SHADER_VARIANT(VK_SHADER_STAGE_RAYGEN_BIT_KHR, IntegrateIndirectRayGenShader, integrate_indirect_rayquery_raygen_neeCache_sharc_update_wboit));
+          } else {
+            shaders.addGeneralShader(GET_SHADER_VARIANT(VK_SHADER_STAGE_RAYGEN_BIT_KHR, IntegrateIndirectRayGenShader, integrate_indirect_rayquery_raygen_neeCache_sharc_update));
+          }
         } else {
-          shaders.addGeneralShader(GET_SHADER_VARIANT(VK_SHADER_STAGE_RAYGEN_BIT_KHR, IntegrateIndirectRayGenShader, integrate_indirect_rayquery_raygen_sharc_update));
+          if (wboitEnabled) {
+            shaders.addGeneralShader(GET_SHADER_VARIANT(VK_SHADER_STAGE_RAYGEN_BIT_KHR, IntegrateIndirectRayGenShader, integrate_indirect_rayquery_raygen_sharc_update_wboit));
+          } else {
+            shaders.addGeneralShader(GET_SHADER_VARIANT(VK_SHADER_STAGE_RAYGEN_BIT_KHR, IntegrateIndirectRayGenShader, integrate_indirect_rayquery_raygen_sharc_update));
+          }
         }
       } else { // Query (sharcMode == 2)
         if (useNeeCache) {
-          shaders.addGeneralShader(GET_SHADER_VARIANT(VK_SHADER_STAGE_RAYGEN_BIT_KHR, IntegrateIndirectRayGenShader, integrate_indirect_rayquery_raygen_neeCache_sharc_query));
+          if (wboitEnabled) {
+            shaders.addGeneralShader(GET_SHADER_VARIANT(VK_SHADER_STAGE_RAYGEN_BIT_KHR, IntegrateIndirectRayGenShader, integrate_indirect_rayquery_raygen_neeCache_sharc_query_wboit));
+          } else {
+            shaders.addGeneralShader(GET_SHADER_VARIANT(VK_SHADER_STAGE_RAYGEN_BIT_KHR, IntegrateIndirectRayGenShader, integrate_indirect_rayquery_raygen_neeCache_sharc_query));
+          }
         } else {
-          shaders.addGeneralShader(GET_SHADER_VARIANT(VK_SHADER_STAGE_RAYGEN_BIT_KHR, IntegrateIndirectRayGenShader, integrate_indirect_rayquery_raygen_sharc_query));
+          if (wboitEnabled) {
+            shaders.addGeneralShader(GET_SHADER_VARIANT(VK_SHADER_STAGE_RAYGEN_BIT_KHR, IntegrateIndirectRayGenShader, integrate_indirect_rayquery_raygen_sharc_query_wboit));
+          } else {
+            shaders.addGeneralShader(GET_SHADER_VARIANT(VK_SHADER_STAGE_RAYGEN_BIT_KHR, IntegrateIndirectRayGenShader, integrate_indirect_rayquery_raygen_sharc_query));
+          }
         }
       }
       // SHARC variants reuse the standard miss shader (no SHARC-specific miss needed)

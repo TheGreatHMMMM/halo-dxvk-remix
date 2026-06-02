@@ -351,7 +351,7 @@ namespace dxvk {
         // NV-DXVK start: SHARC integration
         {IntegrateIndirectMode::SHARC, "SHARC (Spatially Hashed Radiance Cache)",
           "SHARC provides a world-space radiance cache for efficient indirect lighting.\n"
-          "Disables ReSTIR GI and NRC. Requires RayQuery or RayQuery (RGS) raytrace mode.\n"
+          "Disables ReSTIR GI and NRC. Uses the RayQuery (RGS) indirect implementation internally.\n"
           "Allocates approximately 176 MiB of GPU memory when enabled."}
         // NV-DXVK end
     } }

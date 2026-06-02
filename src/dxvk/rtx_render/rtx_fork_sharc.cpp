@@ -84,17 +84,9 @@ namespace dxvk {
       return false;
     }
 
-    // SHARC requires the RayQueryRayGen integrate-indirect pipeline. The CS-RayQuery
-    // variant has no SHARC code path bound (see rtx_pathtracer_integrate_indirect.cpp),
-    // and TraceRay mode is structurally incompatible (the bounce loop and SharcState
-    // must live in the raygen shader, but TraceRay does shading in ClosestHit).
-    // Returning false here also causes ReSTIR-GI / NRC to remain active, so the user
-    // does not get black indirect when the wrong raytrace mode is selected.
-    if (RtxOptions::renderPassIntegrateIndirectRaytraceMode() !=
-        RenderPassIntegrateIndirectRaytraceMode::RayQueryRayGen) {
-      return false;
-    }
-
+    // SHARC is implemented in the RayQueryRayGen indirect pipeline. When the
+    // user selects SHARC, the dispatch path routes through that implementation
+    // internally regardless of the generic indirect raytrace-mode dropdown.
     return true;
   }
 
@@ -103,13 +95,13 @@ namespace dxvk {
     ImGui::TextWrapped("SHARC: Spatially Hashed Radiance Cache");
     ImGui::Separator();
 
-    // TraceRay compatibility warning.
+    // Raytrace mode compatibility note.
     if (RtxOptions::renderPassIntegrateIndirectRaytraceMode() !=
         RenderPassIntegrateIndirectRaytraceMode::RayQueryRayGen) {
       ImGui::PushStyleColor(ImGuiCol_Text, ImVec4(1.0f, 0.6f, 0.1f, 1.0f));
       ImGui::TextWrapped(
-        "WARNING: SHARC requires the RayQuery (RGS) raytrace mode.\n"
-        "Switch the Raytrace Mode combo above to RayQuery (RGS); SHARC is disabled in all other modes.");
+        "NOTE: SHARC uses its RayQuery (RGS) implementation internally.\n"
+        "The generic Integrate Indirect Raytrace Mode selection is ignored while SHARC is active.");
       ImGui::PopStyleColor();
       ImGui::Separator();
     }
@@ -272,7 +264,7 @@ namespace dxvk {
     sharcCb.sceneScale              = sceneScale();
     sharcCb.roughnessThreshold      = roughnessThreshold();
     sharcCb.radianceScale           = kSharcRadianceScale;
-    sharcCb.frameIndex              = static_cast<int>(m_framesSinceClear);
+    sharcCb.frameIndex              = static_cast<int>(m_device->getCurrentFrameId());
     sharcCb.debugMode               = static_cast<int>(debugMode());
     sharcCb.updateProbability       = updateProbability();
     sharcCb.enableQuery             = enableQuery() ? 1 : 0;
