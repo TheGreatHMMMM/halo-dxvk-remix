@@ -82,6 +82,22 @@ struct PathState : IBasePayloadState
                  // indirectLightPortalID(uint:2b), 
                  // bounceIteration(uint:4b)
   uint8_t _roughness;
+
+  // NV-DXVK start: SHARC integration — Stage 3
+#ifndef SHARC_UPDATE
+#define SHARC_UPDATE 0
+#endif
+#ifndef SHARC_QUERY
+#define SHARC_QUERY 0
+#endif
+#if SHARC_UPDATE
+  // The SHARC update raygen dispatch is downscaled and jittered to a full-res
+  // GBuffer pixel in integrate_indirect_pass().  Keep that source coordinate in
+  // path state so update-only code does not accidentally use the compact
+  // DispatchRaysIndex() coordinate for RNGs, RTXDI/NEE lookups, or debug writes.
+  u16vec2 sharcUpdatePixelCoordinate;
+#endif
+  // NV-DXVK end
     
 #if ENABLE_NRC
 
@@ -262,7 +278,11 @@ struct PathState : IBasePayloadState
   {
     get 
     {
+#if SHARC_UPDATE
+      return sharcUpdatePixelCoordinate;
+#else
       return getDispatchRaysIndex().xy;
+#endif
     }
   }
 
@@ -282,6 +302,13 @@ struct PathState : IBasePayloadState
     }
   }
 #endif
+
+  // NV-DXVK start: SHARC integration — Stage 3
+#if SHARC_UPDATE || SHARC_QUERY
+  SharcState sharcState;         // Per-path SHARC accumulator state (backpropagates radiance)
+  float materialRoughnessPrev;   // Query: accumulated roughness footprint for voxel-size gate
+#endif
+  // NV-DXVK end
 
   // Passthrough accessors
   property float3 origin 

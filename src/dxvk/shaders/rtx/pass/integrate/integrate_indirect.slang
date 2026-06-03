@@ -220,8 +220,56 @@
 //!>       NEE_CACHE_ENABLE=0
 //!>       UNORDERED_RESOLVE_WBOIT
 
+// NV-DXVK start: SHARC integration — Stage 3
+//!variant integrate_indirect_rayquery_raygen_neeCache_sharc_update.rgen
+//!>       RAY_PIPELINE
+//!>       NEE_CACHE_ENABLE=1
+//!>       SHARC_UPDATE=1
+
+//!variant integrate_indirect_rayquery_raygen_neeCache_sharc_query.rgen
+//!>       RAY_PIPELINE
+//!>       NEE_CACHE_ENABLE=1
+//!>       SHARC_QUERY=1
+
+//!variant integrate_indirect_rayquery_raygen_sharc_update.rgen
+//!>       RAY_PIPELINE
+//!>       NEE_CACHE_ENABLE=0
+//!>       SHARC_UPDATE=1
+
+//!variant integrate_indirect_rayquery_raygen_sharc_query.rgen
+//!>       RAY_PIPELINE
+//!>       NEE_CACHE_ENABLE=0
+//!>       SHARC_QUERY=1
+
+// SHARC × WBOIT permutations. UNORDERED_RESOLVE_WBOIT is independent of SHARC
+// state — it only affects how unordered-resolve hits accumulate transmittance
+// in resolve.slangh. The SHARC Update/Query gates remain unchanged.
+//!variant integrate_indirect_rayquery_raygen_neeCache_sharc_update_wboit.rgen
+//!>       RAY_PIPELINE
+//!>       NEE_CACHE_ENABLE=1
+//!>       SHARC_UPDATE=1
+//!>       UNORDERED_RESOLVE_WBOIT
+
+//!variant integrate_indirect_rayquery_raygen_neeCache_sharc_query_wboit.rgen
+//!>       RAY_PIPELINE
+//!>       NEE_CACHE_ENABLE=1
+//!>       SHARC_QUERY=1
+//!>       UNORDERED_RESOLVE_WBOIT
+
+//!variant integrate_indirect_rayquery_raygen_sharc_update_wboit.rgen
+//!>       RAY_PIPELINE
+//!>       NEE_CACHE_ENABLE=0
+//!>       SHARC_UPDATE=1
+//!>       UNORDERED_RESOLVE_WBOIT
+
+//!variant integrate_indirect_rayquery_raygen_sharc_query_wboit.rgen
+//!>       RAY_PIPELINE
+//!>       NEE_CACHE_ENABLE=0
+//!>       SHARC_QUERY=1
+//!>       UNORDERED_RESOLVE_WBOIT
 
 //!end-variants
+// NV-DXVK end
 
 #define INTEGRATE_INDIRECT
 #define RAB_HAS_PREVIOUS_GBUFFER 1

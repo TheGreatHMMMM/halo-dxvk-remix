@@ -175,6 +175,9 @@ namespace dxvk {
     ImportanceSampled = 0,   // Importance sampled integration - provides the noisiest output and used primarily for reference comparisons
     ReSTIRGI = 1,            // Importance Sampled + ReSTIR GI integrations
     NeuralRadianceCache = 2, // Implements a live trained neural network to provide a world space radiance cache and allow the pathtracer to terminate paths earlier into the cache.
+    // NV-DXVK start: SHARC integration — Stage 1
+    SHARC = 3,               // Spatially Hashed Radiance Cache: world-space cache that terminates indirect paths early. Disables ReSTIR GI and NRC when active.
+    // NV-DXVK end
   
     Count
   };
@@ -505,8 +508,10 @@ namespace dxvk {
                    "2: RTX Neural Radiance Cache (NRC). NRC is an AI based world space radiance cache. It is live trained by the path tracer\n"
                    "   and allows paths to terminate early by looking up the cached value and saving performance.\n"
                    "   NRC supports infinite bounces and often provides results closer to that of reference than ReSTIR GI\n"
-                   "   while improving performance in scenarios where ray paths have 2 or more bounces on average.\n",
+                   "   while improving performance in scenarios where ray paths have 2 or more bounces on average.\n"
+                   "3: SHARC. Spatially Hashed Radiance Cache world-space cache for indirect lighting.\n",
                    args.environment = "RTX_INTEGRATE_INDIRECT_MODE",
+                   args.maxValue = IntegrateIndirectMode(uint32_t(IntegrateIndirectMode::Count) - 1),
                    args.flags = RtxOptionFlags::UserSetting);
     RTX_OPTION_ARGS("rtx", UpscalerType, upscalerType, UpscalerType::DLSS, "Upscaling boosts performance with varying degrees of image quality tradeoff depending on the type of upscaler and the quality mode/preset.",
                     args.environment = "DXVK_UPSCALER_TYPE",

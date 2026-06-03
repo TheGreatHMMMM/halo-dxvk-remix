@@ -650,17 +650,36 @@ namespace dxvk {
         // Volumetric Lighting
         dispatchVolumetrics(rtOutput);
         
+        // NV-DXVK start: SHARC integration — Stage 4 (clear stale cache on scene/history reset)
+        // Also fires on the very first active frame (needsInitialClear) so that device-local
+        // GPU buffers are zero-filled before any shader reads them.
+        {
+          RtxSharc& sharc = m_common->metaSharc();
+          if ((m_resetHistory || sharc.needsInitialClear()) && sharc.isEnabled()) {
+            sharc.clearBuffers(this, rtOutput);
+          }
+        }
+        // NV-DXVK end
+
         // Path Tracing
         dispatchPathTracing(rtOutput);
 
         // Neural Radiance Cache
-        m_common->metaNeuralRadianceCache().dispatchTrainingAndResolve(*this, rtOutput);
+        // NV-DXVK start: SHARC integration — Stage 4 (skip NRC when SHARC owns indirect)
+        if (!m_common->metaSharc().isEnabled()) {
+          m_common->metaNeuralRadianceCache().dispatchTrainingAndResolve(*this, rtOutput);
+        }
+        // NV-DXVK end
 
         // RTXDI confidence
         m_common->metaRtxdiRayQuery().dispatchConfidence(this, rtOutput);
 
         // ReSTIR GI
-        m_common->metaReSTIRGIRayQuery().dispatch(this, rtOutput);
+        // NV-DXVK start: SHARC integration — Stage 4 (skip ReSTIR GI when SHARC owns indirect)
+        if (!m_common->metaSharc().isEnabled()) {
+          m_common->metaReSTIRGIRayQuery().dispatch(this, rtOutput);
+        }
+        // NV-DXVK end
         
         if (captureScreenImage && captureDebugImage) {
           takeScreenshot("baseReflectivity", rtOutput.m_primaryBaseReflectivity.image(Resources::AccessType::Read));
@@ -1533,6 +1552,10 @@ namespace dxvk {
     dispatchNeeCache(rtOutput);
 
     // Integration Raytracing
+    // NV-DXVK start: SHARC integration — Stage 3
+    // SHARC Update, Resolve, and Query are now orchestrated inside
+    // DxvkPathtracerIntegrateIndirect::dispatch() when sharcEnabled.
+    // NV-DXVK end
     dispatchIntegrate(rtOutput);
   }
   

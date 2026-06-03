@@ -71,6 +71,44 @@ bool initPixelOnLaunch(inout uvec2 gbufferPixelCoordinate, out bool isNrcUpdate)
 
 void integrate_indirect_pass(ivec2 threadIndex)
 {
+  // NV-DXVK start: SHARC integration — Stage 3 (sparse update pixel jitter)
+#if SHARC_UPDATE
+  {
+    uint N = uint(sharcCb.downscaleFactor);
+    if (N > 1u)
+    {
+      uint h = uint(threadIndex.x) ^ (uint(threadIndex.y) << 16u) ^ uint(cb.frameIdx);
+      // PCG-like hash to get a per-block, per-frame random offset
+      h = h ^ (h >> 17u); h *= 0xbf324c81u;
+      h = h ^ (h >> 11u); h *= 0x9c4a3b26u;
+      h = h ^ (h >> 16u);
+      threadIndex = ivec2(threadIndex) * int(N) + ivec2(int(h % N), int((h / N) % N));
+      if (any(uvec2(threadIndex) >= uvec2(cb.camera.resolution)))
+      {
+        return;
+      }
+    }
+
+    // Stochastic update-probability rejection.
+    // sharcCb.updateProbability is in [0,1]; when < 1 a fraction of update tiles
+    // are skipped each frame.  Uses a fast integer hash seeded by pixel + frame so
+    // that different tiles are skipped on different frames (temporal coverage).
+    if (sharcCb.updateProbability < 1.0f)
+    {
+      uint ph = uint(threadIndex.x) ^ (uint(threadIndex.y) << 16u) ^ (uint(cb.frameIdx) * 0x9e3779b9u);
+      ph = ph ^ (ph >> 17u); ph *= 0xbf324c81u;
+      ph = ph ^ (ph >> 11u); ph *= 0x9c4a3b26u;
+      ph = ph ^ (ph >> 16u);
+      float randVal = float(ph) * (1.0f / 4294967296.0f);
+      if (randVal >= sharcCb.updateProbability)
+      {
+        return;
+      }
+    }
+  }
+#endif
+  // NV-DXVK end
+
   uvec2 gbufferPixelCoordinate = threadIndex;
 
   bool isNrcUpdate = false;
