@@ -39,6 +39,80 @@
 #include "rtx/pass/atmosphere/atmosphere_sky.slangh"
 #endif
 
+// NV-DXVK start: SHARC integration — parameter setup + primary-hit debug view
+#ifndef SHARC_UPDATE
+#define SHARC_UPDATE 0
+#endif
+#ifndef SHARC_QUERY
+#define SHARC_QUERY 0
+#endif
+#if SHARC_UPDATE || SHARC_QUERY
+SharcParameters buildSharcParameters()
+{
+  SharcParameters sharcParams;
+  sharcParams.gridParameters.cameraPosition = sharcCb.cameraPosition.xyz;
+  sharcParams.gridParameters.sceneScale     = sharcCb.sceneScale;
+  sharcParams.gridParameters.logarithmBase  = SHARC_GRID_LOGARITHM_BASE;
+  sharcParams.gridParameters.levelBias      = SHARC_GRID_LEVEL_BIAS;
+  sharcParams.hashMapData.capacity          = sharcCb.capacity;
+  sharcParams.hashMapData.hashEntriesBuffer = u_SharcHashEntries;
+  sharcParams.hashMapData.lockBuffer        = u_SharcLock;
+  sharcParams.accumulationBuffer            = u_SharcAccumulation;
+  sharcParams.resolvedBuffer                = u_SharcResolved;
+  sharcParams.radianceScale                 = sharcCb.radianceScale;
+  sharcParams.enableAntiFireflyFilter       = (sharcCb.enableAntiFireflyFilter != 0);
+  return sharcParams;
+}
+#endif
+#if SHARC_QUERY
+void writeSharcPrimaryHashGridDebug(
+  IndirectPathTextures indirectPathTextures,
+  u16vec2 gbufferPixelCoordinate,
+  SharcParameters sharcParams)
+{
+  if (sharcCb.debugMode == 0 || sharcCb.debugMode == 5)
+  {
+    return;
+  }
+
+  float3 dbgColor = float3(0.0f);
+  MinimalSurfaceInteraction primarySurfaceInteraction = minimalSurfaceInteractionReadFromGBuffer(
+    gbufferPixelCoordinate, indirectPathTextures.PrimaryWorldPositionWorldTriangleNormal);
+
+  if (primarySurfaceInteraction.isValid)
+  {
+    switch (sharcCb.debugMode)
+    {
+      case 1: // HashGridColor
+        dbgColor = HashGridDebugColoredHash(
+          primarySurfaceInteraction.position,
+          primarySurfaceInteraction.triangleNormal,
+          sharcParams.gridParameters);
+        break;
+      case 2: // Occupancy
+      case 4: // BitsOccupancy (no dedicated SDK helper; reuses Occupancy viz)
+      {
+        uint2 screenSize;
+        SharcDebugOutput.GetDimensions(screenSize.x, screenSize.y);
+        dbgColor = HashGridDebugOccupancy(uint2(gbufferPixelCoordinate), screenSize, sharcParams.hashMapData);
+        break;
+      }
+      case 3: // HashCollisions
+        dbgColor = HashGridDebugHashCollisions(
+          primarySurfaceInteraction.position,
+          primarySurfaceInteraction.triangleNormal,
+          sharcParams.gridParameters,
+          sharcParams.hashMapData);
+        break;
+      default: break;
+    }
+  }
+
+  SharcDebugOutput[gbufferPixelCoordinate] = float4(dbgColor, primarySurfaceInteraction.isValid ? 1.0f : 0.0f);
+}
+#endif
+// NV-DXVK end
+
 
 
 // Evaluate direct sun lighting for secondary bounces (atmosphere mode) with soft shadows
@@ -427,18 +501,7 @@ void integratePathVertex(
 
   // NV-DXVK start: SHARC integration — Stage 3 (build SharcParameters locally from module resources)
 #if SHARC_UPDATE || SHARC_QUERY
-  SharcParameters sharcParams;
-  sharcParams.gridParameters.cameraPosition = sharcCb.cameraPosition.xyz;
-  sharcParams.gridParameters.sceneScale     = sharcCb.sceneScale;
-  sharcParams.gridParameters.logarithmBase  = SHARC_GRID_LOGARITHM_BASE;
-  sharcParams.gridParameters.levelBias      = SHARC_GRID_LEVEL_BIAS;
-  sharcParams.hashMapData.capacity          = sharcCb.capacity;
-  sharcParams.hashMapData.hashEntriesBuffer = u_SharcHashEntries;
-  sharcParams.hashMapData.lockBuffer        = u_SharcLock;
-  sharcParams.accumulationBuffer            = u_SharcAccumulation;
-  sharcParams.resolvedBuffer                = u_SharcResolved;
-  sharcParams.radianceScale                 = sharcCb.radianceScale;
-  sharcParams.enableAntiFireflyFilter       = (sharcCb.enableAntiFireflyFilter != 0);
+  SharcParameters sharcParams = buildSharcParameters();
 #endif
   // NV-DXVK end
 
@@ -809,36 +872,6 @@ void integratePathVertex(
     vec3 continuationThroughput = vec3(1.0);
     uint8_t continuationLobe = 0;
     vec3 incomingDirection = pathState.direction;
-    {
-      // Sample a new direction
-      float sampledLobePdf, solidAnglePdf;
-
-      // Note: If this sample is invalid the throughput and solid angle pdf will be set to 0.
-      const Ray sampledRay = sampleDirection(
-        randomState, pathState.insideMedium, continuationThroughput,
-        ray, rayInteraction, surfaceInteraction,
-        polymorphicSurfaceMaterialInteraction,
-        continuationLobe, sampledLobePdf, solidAnglePdf,
-        false);
-
-      // Stop recording hit geometry when translucent material emitting a scattering ray
-      if (materialType == surfaceMaterialTypeTranslucent && dot(sampledRay.direction, pathState.direction) < 0.9)
-      {
-        pathState.restirGiHasHitGeometry = true;
-      }
-
-      // Set the ray into the path vertex state
-      pathState.origin = sampledRay.origin;
-      pathState.coneRadius = sampledRay.coneRadius;
-      pathState.direction = sampledRay.direction;
-      pathState.solidAnglePdf = solidAnglePdf;
-    }
-    
-    // Set the material medium index if a medium was entered or exited
-    
-    evalMediumChange(
-      oldInsideMedium, pathState.insideMedium,
-      polymorphicSurfaceMaterialInteraction, pathState.mediumMaterialIndex);
     
     // Get Opaque material information for future reference
     
@@ -854,7 +887,15 @@ void integratePathVertex(
     if (isOpaqueMaterial)
     {
       sharcHitData.positionWorld = surfaceInteraction.position;
-      sharcHitData.normalWorld   = float3(surfaceInteraction.triangleNormal);
+      // Match RTXGI's oriented geometry normal before hashing. SHARC includes
+      // normal bits in the hash key, so opposite normal orientation between
+      // Update and Query lowers cache hit-rate.
+      float3 sharcNormal = float3(surfaceInteraction.triangleNormal);
+      if (dot(sharcNormal, -incomingDirection) < 0.0f)
+      {
+        sharcNormal = -sharcNormal;
+      }
+      sharcHitData.normalWorld = sharcNormal;
 #if SHARC_MATERIAL_DEMODULATION
       float3 fAvg = opaqueSurfaceMaterialInteraction.baseReflectivity
                   + (1.0f - opaqueSurfaceMaterialInteraction.baseReflectivity) * (1.0f / 21.0f);
@@ -876,39 +917,6 @@ void integratePathVertex(
         ? rayInteraction.hitDistance * sqrt(0.5f * a * a / (1.0f - a * a))
         : 0.0f;
       isValidHit = isValidHit && (footprint > voxelSize);
-
-      // NV-DXVK: SHARC integration — debug visualisation write.
-      // Mirrors sharcCb.debugMode (set from rtx.sharc.debugMode, which is auto-
-      // driven by the debug-view selector in rtx_debug_view.cpp). Modes 1-4 use
-      // the SDK helpers in HashGridCommon.h; mode 5 (CachedRadiance) is handled
-      // by the cache-lookup branch below. Writes happen on every opaque primary
-      // hit in the Query pass so the entire screen gets coverage, independent of
-      // whether the cache early-out actually fires.
-      if (sharcCb.debugMode != 0 && sharcCb.debugMode != 5)
-      {
-        float3 dbgColor = float3(0.0f);
-        const float3 dbgPos = surfaceInteraction.position;
-        const float3 dbgNrm = float3(surfaceInteraction.triangleNormal);
-        switch (sharcCb.debugMode)
-        {
-          case 1: // HashGridColor
-            dbgColor = HashGridDebugColoredHash(dbgPos, dbgNrm, sharcParams.gridParameters);
-            break;
-          case 2: // Occupancy
-          case 4: // BitsOccupancy (no dedicated SDK helper; reuses Occupancy viz)
-          {
-            uint2 screenSize;
-            SharcDebugOutput.GetDimensions(screenSize.x, screenSize.y);
-            dbgColor = HashGridDebugOccupancy(uint2(pathState.pixelCoordinate), screenSize, sharcParams.hashMapData);
-            break;
-          }
-          case 3: // HashCollisions
-            dbgColor = HashGridDebugHashCollisions(dbgPos, dbgNrm, sharcParams.gridParameters, sharcParams.hashMapData);
-            break;
-          default: break;
-        }
-        SharcDebugOutput[pathState.pixelCoordinate] = float4(dbgColor, 1.0f);
-      }
 
       float3 cachedRadiance;
       // NV-DXVK: SHARC integration — gate cache early-out by enableQuery so the
@@ -1177,7 +1185,7 @@ void integratePathVertex(
 
     // NV-DXVK start: SHARC integration — Stage 3 (SharcUpdateHit: accumulate direct lighting into cache)
 #if SHARC_UPDATE
-    if (isOpaqueMaterial && pathState.bounceIteration < pathState.pathMaxBounces && any(continuationThroughput != vec3(0.0f)))
+    if (isOpaqueMaterial && pathState.bounceIteration < pathState.pathMaxBounces)
     {
       RNG sharcRng = createRNG(pathState.pixelCoordinate, cb.frameIdx,
         pathState.calculateRNGOffset(kRNGOffsetSampleClosestHitShader) + pathState.bounceIteration + 100u);
@@ -1190,6 +1198,39 @@ void integratePathVertex(
     }
 #endif
     // NV-DXVK end
+
+    // Sample the continuation ray only after SHARC query/update work. This
+    // matches RTXGI's ordering and avoids paying BRDF sampling cost on paths
+    // that terminate from a successful cache lookup.
+    {
+      float sampledLobePdf, solidAnglePdf;
+
+      // Note: If this sample is invalid the throughput and solid angle pdf will be set to 0.
+      const Ray sampledRay = sampleDirection(
+        randomState, pathState.insideMedium, continuationThroughput,
+        ray, rayInteraction, surfaceInteraction,
+        polymorphicSurfaceMaterialInteraction,
+        continuationLobe, sampledLobePdf, solidAnglePdf,
+        false);
+
+      // Stop recording hit geometry when translucent material emitting a scattering ray
+      if (materialType == surfaceMaterialTypeTranslucent && dot(sampledRay.direction, incomingDirection) < 0.9)
+      {
+        pathState.restirGiHasHitGeometry = true;
+      }
+
+      // Set the ray into the path vertex state
+      pathState.origin = sampledRay.origin;
+      pathState.coneRadius = sampledRay.coneRadius;
+      pathState.direction = sampledRay.direction;
+      pathState.solidAnglePdf = solidAnglePdf;
+    }
+
+    // Set the material medium index if a medium was entered or exited
+
+    evalMediumChange(
+      oldInsideMedium, pathState.insideMedium,
+      polymorphicSurfaceMaterialInteraction, pathState.mediumMaterialIndex);
 
     // Check for path termination
     // Note: Bounce iteration refers to the index of the current vertex in the path,
@@ -1706,6 +1747,9 @@ void integrateIndirectPath(
   // NV-DXVK start: SHARC integration — Stage 3 (per-path SHARC state initialization)
 #if SHARC_UPDATE || SHARC_QUERY
   {
+#if SHARC_UPDATE
+    pathState.sharcUpdatePixelCoordinate = gbufferPixelCoordinate;
+#endif
     SharcInit(pathState.sharcState);
 #if SHARC_QUERY
     pathState.materialRoughnessPrev = geometryFlags.firstSampledLobeIsSpecular
@@ -1716,6 +1760,12 @@ void integrateIndirectPath(
 #endif
     // SharcParameters are built per-bounce in integratePathVertex from module-level resources.
   }
+#endif
+  // NV-DXVK end
+
+  // NV-DXVK start: SHARC integration — primary-hit hash-grid debug view
+#if SHARC_QUERY
+  writeSharcPrimaryHashGridDebug(indirectPathTextures, gbufferPixelCoordinate, buildSharcParameters());
 #endif
   // NV-DXVK end
 
