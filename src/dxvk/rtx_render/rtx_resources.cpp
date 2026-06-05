@@ -1194,6 +1194,26 @@ namespace dxvk {
       sharcInfo.size = static_cast<VkDeviceSize>(1u << RtxSharc::capacityLog2()) * 16u;
       m_raytracingOutput.m_sharcResolvedBuffer = m_device->createBuffer(sharcInfo,
         VK_MEMORY_PROPERTY_DEVICE_LOCAL_BIT, DxvkMemoryStats::Category::RTXBuffer, "SHARC Resolved Buffer");
+
+      // Active-list resolve: compact list of cache entries that are resident or
+      // updated this frame. The list is double-buffered in one allocation.
+      const uint32_t sharcCapacity = 1u << RtxSharc::capacityLog2();
+      sharcInfo.size = static_cast<VkDeviceSize>(sharcCapacity) * 2u * sizeof(uint32_t);
+      m_raytracingOutput.m_sharcActiveListBuffer = m_device->createBuffer(sharcInfo,
+        VK_MEMORY_PROPERTY_DEVICE_LOCAL_BIT, DxvkMemoryStats::Category::RTXBuffer, "SHARC Active List Buffer");
+
+      sharcInfo.size = 2u * sizeof(uint32_t);
+      m_raytracingOutput.m_sharcActiveCountBuffer = m_device->createBuffer(sharcInfo,
+        VK_MEMORY_PROPERTY_DEVICE_LOCAL_BIT, DxvkMemoryStats::Category::RTXBuffer, "SHARC Active Count Buffer");
+
+      sharcInfo.size = static_cast<VkDeviceSize>(sharcCapacity) * sizeof(uint32_t);
+      m_raytracingOutput.m_sharcActiveStampBuffer = m_device->createBuffer(sharcInfo,
+        VK_MEMORY_PROPERTY_DEVICE_LOCAL_BIT, DxvkMemoryStats::Category::RTXBuffer, "SHARC Active Stamp Buffer");
+
+      sharcInfo.usage |= VK_BUFFER_USAGE_INDIRECT_BUFFER_BIT;
+      sharcInfo.size = sizeof(VkDispatchIndirectCommand);
+      m_raytracingOutput.m_sharcResolveDispatchArgsBuffer = m_device->createBuffer(sharcInfo,
+        VK_MEMORY_PROPERTY_DEVICE_LOCAL_BIT, DxvkMemoryStats::Category::RTXBuffer, "SHARC Resolve Dispatch Args Buffer");
       // NV-DXVK start: SHARC integration — Stage 3 (debug output texture)
       m_raytracingOutput.m_sharcDebugOutput = createImageResource(ctx, "SHARC Debug Output", m_downscaledExtent, VK_FORMAT_R16G16B16A16_SFLOAT);
       // NV-DXVK end

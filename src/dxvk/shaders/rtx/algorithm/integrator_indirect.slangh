@@ -689,6 +689,10 @@ void integratePathVertex(
     // NV-DXVK start: SHARC integration — Stage 3 (SharcUpdateMiss on sky hit)
 #if SHARC_UPDATE
     SharcUpdateMiss(sharcParams, pathState.sharcState, skyRadiance);
+    for (uint sharcActiveIndex = 0; sharcActiveIndex < pathState.sharcState.pathLength; ++sharcActiveIndex)
+    {
+      SharcMarkActive(pathState.sharcState.cacheIndices[sharcActiveIndex]);
+    }
 #endif
     // NV-DXVK end
   }
@@ -1192,8 +1196,16 @@ void integratePathVertex(
       float randVal = getNextSampleBlueNoise(sharcRng);
       if (!SharcUpdateHit(sharcParams, pathState.sharcState, sharcHitData, pathState.radiance, randVal))
       {
+        for (uint sharcActiveIndex = 0; sharcActiveIndex < pathState.sharcState.pathLength; ++sharcActiveIndex)
+        {
+          SharcMarkActive(pathState.sharcState.cacheIndices[sharcActiveIndex]);
+        }
         pathState.continuePath = false;
         return;
+      }
+      for (uint sharcActiveIndex = 0; sharcActiveIndex < pathState.sharcState.pathLength; ++sharcActiveIndex)
+      {
+        SharcMarkActive(pathState.sharcState.cacheIndices[sharcActiveIndex]);
       }
     }
 #endif

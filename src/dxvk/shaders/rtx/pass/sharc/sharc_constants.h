@@ -43,7 +43,7 @@ static const float kSharcRadianceScale = 1.0e3f;
 
 // ---- SharcConstants (constant buffer sent to shaders) ----------------------
 // Layout must be identical in C++ and Slang.  Padded to 16-byte alignment.
-// sizeof(SharcConstants) == 80 bytes (verified in rtx_fork_sharc.cpp).
+// sizeof(SharcConstants) == 96 bytes (verified in rtx_fork_sharc.cpp).
 struct SharcConstants {
 #ifdef __cplusplus
   dxvk::Vector4 cameraPosition;      // xyz = position, w = unused
@@ -67,7 +67,12 @@ struct SharcConstants {
   int   debugMode;               // 0 = off, see SharcDebugMode in rtx_fork_sharc.h
   float updateProbability;       // [0,1] stochastic update rejection probability (default 1.0 = all pixels update)
   int   enableQuery;             // 0 = skip cache early-out in Query pass (benchmark fallback), 1 = enabled
+
+  int   activeListReadIndex;      // 0 or 1: active-list half consumed by this frame's resolve
+  int   activeListReadGeneration; // stamp value for entries resident in the read half
+  int   activeListWriteGeneration;// stamp value written for entries surviving into the next half
+  int   fullTableResolve;         // 0 = compact active-list resolve, 1 = full hash-table resolve fallback
 };
-// C++ size check in rtx_fork_sharc.cpp: static_assert(sizeof(SharcConstants) == 80, ...)
+// C++ size check in rtx_fork_sharc.cpp: static_assert(sizeof(SharcConstants) == 96, ...)
 
 #endif // SHARC_CONSTANTS_H

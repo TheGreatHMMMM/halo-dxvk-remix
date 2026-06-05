@@ -71,6 +71,15 @@ RWStructuredBuffer<SharcPackedData> u_Resolved;
 layout(binding = SHARC_RESOLVE_BINDING_CONSTANTS)
 ConstantBuffer<SharcConstants> sharcCb;
 
+layout(binding = SHARC_RESOLVE_BINDING_ACTIVE_LIST)
+RWStructuredBuffer<uint> u_ActiveList;
+
+layout(binding = SHARC_RESOLVE_BINDING_ACTIVE_COUNTS)
+RWStructuredBuffer<uint> u_ActiveCounts;
+
+layout(binding = SHARC_RESOLVE_BINDING_ACTIVE_STAMPS)
+RWStructuredBuffer<uint> u_ActiveStamps;
+
 // ---- Main ------------------------------------------------------------------
 [shader("compute")]
 [numthreads(256, 1, 1)]
@@ -99,8 +108,39 @@ void main(uint3 threadId : SV_DispatchThreadID)
   resolveParams.staleFrameNumMax     = uint(sharcCb.staleFrameNumMax);
   resolveParams.frameIndex           = uint(sharcCb.frameIndex);
 
-  // Each thread resolves exactly one hash-map entry.
-  SharcResolveEntry(threadId.x, params, resolveParams);
+  const bool fullTableResolve = sharcCb.fullTableResolve != 0;
+  const uint readIndex = uint(sharcCb.activeListReadIndex);
+  const uint writeIndex = 1u - readIndex;
+  const uint activeCount = fullTableResolve
+    ? uint(sharcCb.capacity)
+    : min(u_ActiveCounts[readIndex], uint(sharcCb.capacity));
+
+  if (threadId.x >= activeCount)
+  {
+    return;
+  }
+
+  const uint entryIndex = fullTableResolve
+    ? threadId.x
+    : u_ActiveList[readIndex * uint(sharcCb.capacity) + threadId.x];
+
+  // Each thread resolves either one compact-list entry or, on fallback frames,
+  // one full hash-map slot so stale entries that fell off the active list still
+  // get aged and evicted.
+  SharcResolveEntry(entryIndex, params, resolveParams);
+
+  // Carry entries that survived stale eviction into next frame's active-list half.
+  if (BUFFER_AT_OFFSET(params.hashMapData.hashEntriesBuffer, entryIndex) != HASH_GRID_INVALID_HASH_KEY)
+  {
+    uint listIndex;
+    InterlockedAdd(u_ActiveCounts[writeIndex], 1u, listIndex);
+
+    if (listIndex < uint(sharcCb.capacity))
+    {
+      u_ActiveList[writeIndex * uint(sharcCb.capacity) + listIndex] = entryIndex;
+      u_ActiveStamps[entryIndex] = uint(sharcCb.activeListWriteGeneration);
+    }
+  }
 }
 
 // NV-DXVK end

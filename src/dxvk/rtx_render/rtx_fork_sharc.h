@@ -94,6 +94,10 @@ namespace dxvk {
     Rc<DxvkBuffer> m_sharcLockBuffer;
     Rc<DxvkBuffer> m_sharcAccumBuffer;
     Rc<DxvkBuffer> m_sharcResolvedBuffer;
+    Rc<DxvkBuffer> m_sharcActiveListBuffer;
+    Rc<DxvkBuffer> m_sharcActiveCountBuffer;
+    Rc<DxvkBuffer> m_sharcActiveStampBuffer;
+    Rc<DxvkBuffer> m_sharcResolveDispatchArgsBuffer;
 
     // ---- RTX_OPTIONs ----------------------------------------------------------
     // Namespace: "rtx.sharc"
@@ -150,6 +154,10 @@ namespace dxvk {
                "Enables cache queries during path termination.\n"
                "Disable to measure the overhead of full path tracing without cache lookups.");
 
+    RTX_OPTION("rtx.sharc", int, fullResolveFrameInterval, 60,
+           "Runs a full hash-table resolve every N SHARC update frames as a safety fallback.\n"
+           "Frames between fallbacks use the compact active-list resolve. Set to 0 to disable full fallback.");
+
     // Returns true on the very first call to isEnabled() before any clearBuffers().
     // Used by RtxContext to guarantee a zero-fill on the first active frame so that
     // GPU hash/accumulation/resolved buffers never contain uninitialized garbage.
@@ -172,8 +180,15 @@ namespace dxvk {
     // four device-local GPU buffers are zero-filled before any shader reads them.
     bool m_needsInitialClear = true;
 
+    // Active-list resolve ping-pong state. The read index selects the active
+    // list populated by the previous frame and appended to by the Update pass;
+    // Resolve writes surviving entries into the opposite half and advances the
+    // generation to keep update-side append de-duplication stable.
+    uint32_t m_activeListReadIndex = 0u;
+    uint32_t m_activeListGeneration = 1u;
+
     // Builds SharcConstants and uploads to staging ring; returns the buffer slice.
-    DxvkBufferSlice buildAndUploadCb(RtxContext* ctx);
+    DxvkBufferSlice buildAndUploadCb(RtxContext* ctx, bool fullTableResolve = false);
   };
 
 } // namespace dxvk

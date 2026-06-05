@@ -356,6 +356,10 @@ namespace dxvk
       Rc<DxvkBuffer> m_sharcLockBuffer;
       Rc<DxvkBuffer> m_sharcAccumBuffer;
       Rc<DxvkBuffer> m_sharcResolvedBuffer;
+      Rc<DxvkBuffer> m_sharcActiveListBuffer;
+      Rc<DxvkBuffer> m_sharcActiveCountBuffer;
+      Rc<DxvkBuffer> m_sharcActiveStampBuffer;
+      Rc<DxvkBuffer> m_sharcResolveDispatchArgsBuffer;
       Resource m_sharcDebugOutput;  // NV-DXVK: SHARC debug visualization texture (rgba16f)
       // NV-DXVK end
 

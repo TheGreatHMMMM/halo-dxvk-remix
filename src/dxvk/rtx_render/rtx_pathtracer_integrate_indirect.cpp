@@ -216,6 +216,9 @@ namespace dxvk {
         RW_STRUCTURED_BUFFER(INTEGRATE_INDIRECT_BINDING_SHARC_RESOLVED)
         CONSTANT_BUFFER(INTEGRATE_INDIRECT_BINDING_SHARC_CONSTANTS)
         RW_TEXTURE2D(INTEGRATE_INDIRECT_BINDING_SHARC_DEBUG_OUTPUT)
+        RW_STRUCTURED_BUFFER(INTEGRATE_INDIRECT_BINDING_SHARC_ACTIVE_LIST)
+        RW_STRUCTURED_BUFFER(INTEGRATE_INDIRECT_BINDING_SHARC_ACTIVE_COUNTS)
+        RW_STRUCTURED_BUFFER(INTEGRATE_INDIRECT_BINDING_SHARC_ACTIVE_STAMPS)
         // NV-DXVK end
 
       END_PARAMETER()
@@ -531,6 +534,12 @@ namespace dxvk {
         DxvkBufferSlice(rtOutput.m_sharcResolvedBuffer, 0, rtOutput.m_sharcResolvedBuffer->info().size));
       sharc.bindConstantBuffer(ctx, INTEGRATE_INDIRECT_BINDING_SHARC_CONSTANTS, rtOutput);
       ctx->bindResourceView(INTEGRATE_INDIRECT_BINDING_SHARC_DEBUG_OUTPUT, rtOutput.m_sharcDebugOutput.view, nullptr);
+      ctx->bindResourceBuffer(INTEGRATE_INDIRECT_BINDING_SHARC_ACTIVE_LIST,
+        DxvkBufferSlice(rtOutput.m_sharcActiveListBuffer, 0, rtOutput.m_sharcActiveListBuffer->info().size));
+      ctx->bindResourceBuffer(INTEGRATE_INDIRECT_BINDING_SHARC_ACTIVE_COUNTS,
+        DxvkBufferSlice(rtOutput.m_sharcActiveCountBuffer, 0, rtOutput.m_sharcActiveCountBuffer->info().size));
+      ctx->bindResourceBuffer(INTEGRATE_INDIRECT_BINDING_SHARC_ACTIVE_STAMPS,
+        DxvkBufferSlice(rtOutput.m_sharcActiveStampBuffer, 0, rtOutput.m_sharcActiveStampBuffer->info().size));
     } else {
       ctx->bindResourceBuffer(INTEGRATE_INDIRECT_BINDING_SHARC_HASH_ENTRIES, DxvkBufferSlice());
       ctx->bindResourceBuffer(INTEGRATE_INDIRECT_BINDING_SHARC_LOCK, DxvkBufferSlice());
@@ -538,6 +547,9 @@ namespace dxvk {
       ctx->bindResourceBuffer(INTEGRATE_INDIRECT_BINDING_SHARC_RESOLVED, DxvkBufferSlice());
       ctx->bindResourceBuffer(INTEGRATE_INDIRECT_BINDING_SHARC_CONSTANTS, DxvkBufferSlice());
       ctx->bindResourceView(INTEGRATE_INDIRECT_BINDING_SHARC_DEBUG_OUTPUT, nullptr, nullptr);
+      ctx->bindResourceBuffer(INTEGRATE_INDIRECT_BINDING_SHARC_ACTIVE_LIST, DxvkBufferSlice());
+      ctx->bindResourceBuffer(INTEGRATE_INDIRECT_BINDING_SHARC_ACTIVE_COUNTS, DxvkBufferSlice());
+      ctx->bindResourceBuffer(INTEGRATE_INDIRECT_BINDING_SHARC_ACTIVE_STAMPS, DxvkBufferSlice());
     }
     // NV-DXVK end
 

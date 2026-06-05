@@ -218,5 +218,40 @@ ConstantBuffer<SharcConstants> sharcCb;
 
 layout(rgba16f, binding = INTEGRATE_INDIRECT_BINDING_SHARC_DEBUG_OUTPUT)
 RWTexture2D<float4> SharcDebugOutput;
+
+#if SHARC_UPDATE
+layout(binding = INTEGRATE_INDIRECT_BINDING_SHARC_ACTIVE_LIST)
+RWStructuredBuffer<uint> u_SharcActiveList;
+
+layout(binding = INTEGRATE_INDIRECT_BINDING_SHARC_ACTIVE_COUNTS)
+RWStructuredBuffer<uint> u_SharcActiveCounts;
+
+layout(binding = INTEGRATE_INDIRECT_BINDING_SHARC_ACTIVE_STAMPS)
+RWStructuredBuffer<uint> u_SharcActiveStamps;
+
+void SharcMarkActive(HashGridIndex cacheIndex)
+{
+    if (cacheIndex == HASH_GRID_INVALID_CACHE_INDEX)
+    {
+        return;
+    }
+
+    const uint generation = uint(sharcCb.activeListReadGeneration);
+    uint previousGeneration;
+    InterlockedExchange(u_SharcActiveStamps[cacheIndex], generation, previousGeneration);
+
+    if (previousGeneration != generation)
+    {
+        uint listIndex;
+        const uint listOffset = uint(sharcCb.activeListReadIndex) * uint(sharcCb.capacity);
+        InterlockedAdd(u_SharcActiveCounts[uint(sharcCb.activeListReadIndex)], 1u, listIndex);
+
+        if (listIndex < uint(sharcCb.capacity))
+        {
+            u_SharcActiveList[listOffset + listIndex] = cacheIndex;
+        }
+    }
+}
+#endif
 #endif
 // NV-DXVK end

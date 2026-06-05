@@ -29,6 +29,16 @@
 // ---- Constant buffer --------------------------------------------------------
 #define SHARC_RESOLVE_BINDING_CONSTANTS      234 // ConstantBuffer<SharcConstants>
 
+// ---- Active-list resolve ----------------------------------------------------
+// The active list is double-buffered in one uint buffer: [capacity entries for
+// read half][capacity entries for write half]. Counts contains two uints, one
+// per half. ActiveStamp is one uint per cache entry and stores the generation
+// that last appended the entry, preventing duplicate resolves within a frame.
+#define SHARC_RESOLVE_BINDING_ACTIVE_LIST    236 // RWStructuredBuffer<uint>
+#define SHARC_RESOLVE_BINDING_ACTIVE_COUNTS  237 // RWStructuredBuffer<uint>
+#define SHARC_RESOLVE_BINDING_ACTIVE_STAMPS  238 // RWStructuredBuffer<uint>
+#define SHARC_RESOLVE_BINDING_DISPATCH_ARGS  239 // RWStructuredBuffer<uint> (VkDispatchIndirectCommand)
+
 #endif // SHARC_RESOLVE_BINDING_INDICES_H
 
 // NV-DXVK end

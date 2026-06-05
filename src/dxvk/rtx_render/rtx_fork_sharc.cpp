@@ -30,6 +30,7 @@
 #include "rtx_scene_manager.h"
 #include "rtx_camera.h"
 #include <rtx_shaders/sharc_resolve.h>
+#include <rtx_shaders/sharc_resolve_args.h>
 
 #include <cassert>
 
@@ -48,16 +49,29 @@ namespace dxvk {
         RW_STRUCTURED_BUFFER(SHARC_RESOLVE_BINDING_ACCUMULATION)
         RW_STRUCTURED_BUFFER(SHARC_RESOLVE_BINDING_RESOLVED)
         CONSTANT_BUFFER(SHARC_RESOLVE_BINDING_CONSTANTS)
+        RW_STRUCTURED_BUFFER(SHARC_RESOLVE_BINDING_ACTIVE_LIST)
+        RW_STRUCTURED_BUFFER(SHARC_RESOLVE_BINDING_ACTIVE_COUNTS)
+        RW_STRUCTURED_BUFFER(SHARC_RESOLVE_BINDING_ACTIVE_STAMPS)
       END_PARAMETER()
     };
     PREWARM_SHADER_PIPELINE(SharcResolveShader);
+
+    class SharcResolveArgsShader : public ManagedShader {
+      SHADER_SOURCE(SharcResolveArgsShader, VK_SHADER_STAGE_COMPUTE_BIT, sharc_resolve_args)
+      BEGIN_PARAMETER()
+        CONSTANT_BUFFER(SHARC_RESOLVE_BINDING_CONSTANTS)
+        RW_STRUCTURED_BUFFER(SHARC_RESOLVE_BINDING_ACTIVE_COUNTS)
+        RW_STRUCTURED_BUFFER(SHARC_RESOLVE_BINDING_DISPATCH_ARGS)
+      END_PARAMETER()
+    };
+    PREWARM_SHADER_PIPELINE(SharcResolveArgsShader);
   } // anonymous namespace
 
   // ---- Size assertions -------------------------------------------------------
-  // Verify that SharcConstants is exactly 80 bytes so the GPU constant buffer
+  // Verify that SharcConstants is exactly 96 bytes so the GPU constant buffer
   // layout matches between C++ and Slang. Update the assert value if the struct
   // is intentionally changed.
-  static_assert(sizeof(SharcConstants) == 80,
+  static_assert(sizeof(SharcConstants) == 96,
     "SharcConstants size mismatch: update the padding or the layout comment in sharc_constants.h");
 
   // ---- Constructor -----------------------------------------------------------
@@ -248,7 +262,7 @@ namespace dxvk {
   // One compute thread per hash-map entry; 64 threads per workgroup.
   // Called from RtxContext::dispatchPathTracing() when isEnabled() is true.
   // ---- buildAndUploadCb() -------------------------------------------------------
-  DxvkBufferSlice RtxSharc::buildAndUploadCb(RtxContext* ctx) {
+  DxvkBufferSlice RtxSharc::buildAndUploadCb(RtxContext* ctx, bool fullTableResolve) {
     const RtCamera& mainCamera  = ctx->getSceneManager().getCamera();
     const Vector3   camPos      = mainCamera.getPosition();
     const Vector3   camPosPrev  = mainCamera.getPreviousPosition();
@@ -268,6 +282,10 @@ namespace dxvk {
     sharcCb.debugMode               = static_cast<int>(debugMode());
     sharcCb.updateProbability       = updateProbability();
     sharcCb.enableQuery             = enableQuery() ? 1 : 0;
+    sharcCb.activeListReadIndex     = static_cast<int>(m_activeListReadIndex);
+    sharcCb.activeListReadGeneration = static_cast<int>(m_activeListGeneration);
+    sharcCb.activeListWriteGeneration = static_cast<int>(m_activeListGeneration + 1u);
+    sharcCb.fullTableResolve        = fullTableResolve ? 1 : 0;
 
     const VkDeviceSize alignment =
       ctx->getDevice()->properties().core.properties.limits.minUniformBufferOffsetAlignment;
@@ -298,6 +316,8 @@ namespace dxvk {
     // on the very next Update/Resolve pass after the cache is wiped.
     m_framesSinceClear = 0u;
     m_needsInitialClear = false;
+    m_activeListReadIndex = 0u;
+    m_activeListGeneration = 1u;
 
     Rc<DxvkCommandList> cmdList = ctx->getCommandList();
 
@@ -305,12 +325,20 @@ namespace dxvk {
     cmdList->cmdFillBuffer(rtOutput.m_sharcLockBuffer->getSliceHandle().handle,     0, VK_WHOLE_SIZE, 0u);
     cmdList->cmdFillBuffer(rtOutput.m_sharcAccumBuffer->getSliceHandle().handle,    0, VK_WHOLE_SIZE, 0u);
     cmdList->cmdFillBuffer(rtOutput.m_sharcResolvedBuffer->getSliceHandle().handle, 0, VK_WHOLE_SIZE, 0u);
+    cmdList->cmdFillBuffer(rtOutput.m_sharcActiveListBuffer->getSliceHandle().handle, 0, VK_WHOLE_SIZE, 0u);
+    cmdList->cmdFillBuffer(rtOutput.m_sharcActiveCountBuffer->getSliceHandle().handle, 0, VK_WHOLE_SIZE, 0u);
+    cmdList->cmdFillBuffer(rtOutput.m_sharcActiveStampBuffer->getSliceHandle().handle, 0, VK_WHOLE_SIZE, 0u);
+    cmdList->cmdFillBuffer(rtOutput.m_sharcResolveDispatchArgsBuffer->getSliceHandle().handle, 0, VK_WHOLE_SIZE, 0u);
 
     // Track resources so the command list keeps the buffers alive until submission.
     cmdList->trackResource<DxvkAccess::Write>(rtOutput.m_sharcHashBuffer);
     cmdList->trackResource<DxvkAccess::Write>(rtOutput.m_sharcLockBuffer);
     cmdList->trackResource<DxvkAccess::Write>(rtOutput.m_sharcAccumBuffer);
     cmdList->trackResource<DxvkAccess::Write>(rtOutput.m_sharcResolvedBuffer);
+    cmdList->trackResource<DxvkAccess::Write>(rtOutput.m_sharcActiveListBuffer);
+    cmdList->trackResource<DxvkAccess::Write>(rtOutput.m_sharcActiveCountBuffer);
+    cmdList->trackResource<DxvkAccess::Write>(rtOutput.m_sharcActiveStampBuffer);
+    cmdList->trackResource<DxvkAccess::Write>(rtOutput.m_sharcResolveDispatchArgsBuffer);
 
     // Memory barrier: Transfer writes → RT/Compute shader reads and writes.
     ctx->emitMemoryBarrier(0,
@@ -323,8 +351,12 @@ namespace dxvk {
   void RtxSharc::dispatch(RtxContext* ctx, const Resources::RaytracingOutput& rtOutput) {
     ScopedCpuProfileZone();
 
+    const int fullResolveInterval = fullResolveFrameInterval();
+    const bool runFullTableResolve = fullResolveInterval > 0
+      && (m_framesSinceClear % static_cast<uint32_t>(fullResolveInterval)) == 0u;
+
     // ---- Build SharcConstants constant buffer --------------------------------
-    DxvkBufferSlice cb = buildAndUploadCb(ctx);
+    DxvkBufferSlice cb = buildAndUploadCb(ctx, runFullTableResolve);
 
     // ---- Bind UAV buffers (from RaytracingOutput) ----------------------------
     ctx->bindResourceBuffer(SHARC_RESOLVE_BINDING_HASH_ENTRIES,
@@ -336,27 +368,75 @@ namespace dxvk {
     ctx->bindResourceBuffer(SHARC_RESOLVE_BINDING_RESOLVED,
       DxvkBufferSlice(rtOutput.m_sharcResolvedBuffer, 0, rtOutput.m_sharcResolvedBuffer->info().size));
     ctx->bindResourceBuffer(SHARC_RESOLVE_BINDING_CONSTANTS, cb);
+    ctx->bindResourceBuffer(SHARC_RESOLVE_BINDING_ACTIVE_LIST,
+      DxvkBufferSlice(rtOutput.m_sharcActiveListBuffer, 0, rtOutput.m_sharcActiveListBuffer->info().size));
+    ctx->bindResourceBuffer(SHARC_RESOLVE_BINDING_ACTIVE_COUNTS,
+      DxvkBufferSlice(rtOutput.m_sharcActiveCountBuffer, 0, rtOutput.m_sharcActiveCountBuffer->info().size));
+    ctx->bindResourceBuffer(SHARC_RESOLVE_BINDING_ACTIVE_STAMPS,
+      DxvkBufferSlice(rtOutput.m_sharcActiveStampBuffer, 0, rtOutput.m_sharcActiveStampBuffer->info().size));
 
     // Track UAV lifetimes
     ctx->getCommandList()->trackResource<DxvkAccess::Write>(rtOutput.m_sharcHashBuffer);
     ctx->getCommandList()->trackResource<DxvkAccess::Write>(rtOutput.m_sharcLockBuffer);
     ctx->getCommandList()->trackResource<DxvkAccess::Write>(rtOutput.m_sharcAccumBuffer);
     ctx->getCommandList()->trackResource<DxvkAccess::Write>(rtOutput.m_sharcResolvedBuffer);
+    ctx->getCommandList()->trackResource<DxvkAccess::Write>(rtOutput.m_sharcActiveListBuffer);
+    ctx->getCommandList()->trackResource<DxvkAccess::Write>(rtOutput.m_sharcActiveCountBuffer);
+    ctx->getCommandList()->trackResource<DxvkAccess::Write>(rtOutput.m_sharcActiveStampBuffer);
+
+    // Clear the output-half count before Resolve compacts surviving entries into it.
+    const uint32_t writeIndex = 1u - m_activeListReadIndex;
+    ctx->getCommandList()->cmdFillBuffer(
+      rtOutput.m_sharcActiveCountBuffer->getSliceHandle().handle,
+      writeIndex * sizeof(uint32_t),
+      sizeof(uint32_t),
+      0u);
+    ctx->getCommandList()->trackResource<DxvkAccess::Write>(rtOutput.m_sharcActiveCountBuffer);
+
+    ctx->emitMemoryBarrier(0, VK_PIPELINE_STAGE_TRANSFER_BIT,
+      VK_ACCESS_TRANSFER_WRITE_BIT, VK_PIPELINE_STAGE_COMPUTE_SHADER_BIT,
+      VK_ACCESS_SHADER_READ_BIT | VK_ACCESS_SHADER_WRITE_BIT);
+
+    if (!runFullTableResolve) {
+      // Build indirect dispatch args from the active count populated by Update.
+      ctx->bindResourceBuffer(SHARC_RESOLVE_BINDING_DISPATCH_ARGS,
+        DxvkBufferSlice(rtOutput.m_sharcResolveDispatchArgsBuffer, 0, rtOutput.m_sharcResolveDispatchArgsBuffer->info().size));
+      ctx->getCommandList()->trackResource<DxvkAccess::Write>(rtOutput.m_sharcResolveDispatchArgsBuffer);
+
+      ctx->bindShader(VK_SHADER_STAGE_COMPUTE_BIT, SharcResolveArgsShader::getShader());
+      ctx->dispatch(1u, 1u, 1u);
+
+      ctx->emitMemoryBarrier(0, VK_PIPELINE_STAGE_COMPUTE_SHADER_BIT,
+        VK_ACCESS_SHADER_WRITE_BIT,
+        VK_PIPELINE_STAGE_COMPUTE_SHADER_BIT | VK_PIPELINE_STAGE_DRAW_INDIRECT_BIT,
+        VK_ACCESS_SHADER_READ_BIT | VK_ACCESS_INDIRECT_COMMAND_READ_BIT);
+    }
 
     // ---- Bind shader and dispatch -------------------------------------------
     ctx->bindShader(VK_SHADER_STAGE_COMPUTE_BIT, SharcResolveShader::getShader());
 
-    // 1 thread per hash-map entry; shader threadgroup size = [256, 1, 1]
-    // (matches RTXGI 2.7 LINEAR_BLOCK_SIZE = 256).
-    const uint32_t capacity = m_capacity;
-    ctx->dispatch(capacity / 256u, 1u, 1u);
+    if (runFullTableResolve) {
+      // Fallback: resolve one thread per hash-map slot periodically so stale
+      // entries that receive no updates are still aged out of the cache.
+      ctx->dispatch((m_capacity + 255u) / 256u, 1u, 1u);
+    } else {
+      // Fast path: 1 thread per active cache entry. Dispatch arguments are
+      // generated on the GPU from the compact active-list count.
+      ctx->bindDrawBuffers(
+        DxvkBufferSlice(rtOutput.m_sharcResolveDispatchArgsBuffer, 0, rtOutput.m_sharcResolveDispatchArgsBuffer->info().size),
+        DxvkBufferSlice());
+      ctx->dispatchIndirect(0u);
+    }
 
     // Release staging buffer slice after GPU submission
     ctx->getCommandList()->trackResource<DxvkAccess::Read>(cb.buffer());
+    ctx->getCommandList()->trackResource<DxvkAccess::Read>(rtOutput.m_sharcResolveDispatchArgsBuffer);
 
     // Stage 5: advance the frame counter so the SDK frame-0 init path fires
     // only immediately after clearBuffers() and not on every frame.
     ++m_framesSinceClear;
+    m_activeListReadIndex = writeIndex;
+    ++m_activeListGeneration;
   }
 
 } // namespace dxvk

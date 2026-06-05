@@ -811,8 +811,8 @@ initializer list and can't be lifted into a separate TU.
 - **Inline tweak** at `(file scope)` (SHARC include) — 1-line addition (SHARC Stage 1).
   *Adds `#include "rtx_fork_sharc.h"` so `RtxSharc` buffer members and the `kSharcCapacity` constant are visible in the `allocate` method.*
 
-- **Inline tweak** at `Resources::allocate` (SHARC buffer allocation block) — ~20 LOC (SHARC Stage 1).
-  *Allocates the five SHARC GPU buffers when `RtxSharc::enable()` is true: `m_sharcHashBuffer` (8 B/entry × capacity = 32 MiB at log2=22), `m_sharcLockBuffer` (4 B/entry = 16 MiB), `m_sharcAccumBuffer` (16 B/entry = 64 MiB, `SharcAccumulationData`), `m_sharcResolvedBuffer` (16 B/entry = 64 MiB, `SharcPackedData`), and `m_sharcDebugOutput` (RGBA16F render target at a fixed 1280×720 debug resolution). Allocation is skipped when SHARC is disabled to avoid reserving ~176 MiB of VRAM for an inactive feature.*
+- **Inline tweak** at `Resources::allocate` (SHARC buffer allocation block) — SHARC Stage 1 + active-list resolve.
+  *Allocates the SHARC GPU buffers when `RtxSharc::enable()` is true: hash, lock, accumulation, resolved, debug output, plus active-list resolve buffers (`m_sharcActiveListBuffer`, `m_sharcActiveCountBuffer`, `m_sharcActiveStampBuffer`, and `m_sharcResolveDispatchArgsBuffer`). The active-list buffers let normal frames resolve only touched/live cache entries, while `rtx.sharc.fullResolveFrameInterval` periodically falls back to a full table scan for stale-entry cleanup.*
 
 ---
 
@@ -828,8 +828,8 @@ initializer list and can't be lifted into a separate TU.
 - **Inline tweak** at `Resources` class (private member fields) (~line 469) — 4-line addition.
   *Adds `m_atmosphereTransmittanceLut`, `m_atmosphereMultiscatteringLut`, and `m_atmosphereSkyViewLut` storage fields to `Resources`.*
 
-- **Inline tweak** at `Resources` class (SHARC private member fields) — 5-line addition (SHARC Stage 1).
-  *Adds four `Rc<DxvkBuffer>` members (`m_sharcHashBuffer`, `m_sharcLockBuffer`, `m_sharcAccumBuffer`, `m_sharcResolvedBuffer`) and one `Resource m_sharcDebugOutput` to the `Resources` class. These are accessed by `RtxSharc::dispatch` (Stage 2) and `DxvkPathtracerIntegrateIndirect::dispatch` (Stage 3) via the `RaytracingOutput` struct.*
+- **Inline tweak** at `Resources` class (SHARC private member fields) — SHARC Stage 1 + active-list resolve.
+  *Adds the SHARC cache buffers (`m_sharcHashBuffer`, `m_sharcLockBuffer`, `m_sharcAccumBuffer`, `m_sharcResolvedBuffer`), debug output, and active-list resolve buffers (`m_sharcActiveListBuffer`, `m_sharcActiveCountBuffer`, `m_sharcActiveStampBuffer`, `m_sharcResolveDispatchArgsBuffer`) to `RaytracingOutput`. These are accessed by `RtxSharc::dispatch` and `DxvkPathtracerIntegrateIndirect::dispatch`.*
 
 ---
 
@@ -1669,8 +1669,8 @@ Fork resolution: restore the numerical hemisphere integration in the LUT bake AN
 - **Inline tweak** at `(file scope)` (SHARC shader variant includes) — 4-line addition (SHARC Stage 3).
   *Adds four `#include` lines for the compiled SHARC raygen shader headers: `integrate_indirect_rayquery_raygen_neeCache_sharc_update.h`, `integrate_indirect_rayquery_raygen_neeCache_sharc_query.h`, `integrate_indirect_rayquery_raygen_sharc_update.h`, `integrate_indirect_rayquery_raygen_sharc_query.h`.*
 
-- **Inline tweak** at `DxvkPathtracerIntegrateIndirect` BEGIN_PARAMETER / END_PARAMETER block — ~6-line addition (SHARC Stage 3).
-  *Adds six binding declarations (`SHADER_BUFFER_DESC` × 4 + `SHADER_CONSTANT_BUFFER_DESC` + `SHADER_IMAGE_DESC`) for `INTEGRATE_INDIRECT_BINDING_SHARC_HASH_ENTRIES` through `INTEGRATE_INDIRECT_BINDING_SHARC_DEBUG_OUTPUT` so the SHARC buffers are included in the pipeline binding layout.*
+- **Inline tweak** at `DxvkPathtracerIntegrateIndirect` BEGIN_PARAMETER / END_PARAMETER block — SHARC Stage 3 + active-list resolve.
+  *Adds binding declarations for SHARC cache buffers, constants, debug output, and active-list update buffers so the Update raygen can append touched cache indices for compact resolve.*
 
 - **Inline tweak** at `DxvkPathtracerIntegrateIndirect::prewarmShaders` — ~4-line addition (SHARC Stage 3).
   *Precompiles the four SHARC raygen shader variants (update+query × neeCache on/off) during shader prewarm to avoid first-frame stutter.*
@@ -1678,8 +1678,8 @@ Fork resolution: restore the numerical hemisphere integration in the LUT bake AN
 - **Inline tweak** at `DxvkPathtracerIntegrateIndirect::logIntegrateIndirectMode` — 3-line addition (SHARC Stage 5 fix).
   *Adds a log case for `IntegrateIndirectMode::SHARC` so the renderer reports SHARC activation instead of hitting the default/assert path.*
 
-- **Inline tweak** at `DxvkPathtracerIntegrateIndirect::dispatch` (SHARC dispatch block) — ~30 LOC (SHARC Stage 3).
-  *When `IntegrateIndirectMode::SHARC` is active: binds `m_sharcHashBuffer`, `m_sharcLockBuffer`, `m_sharcAccumBuffer`, `m_sharcResolvedBuffer` (from `RaytracingOutput`) plus the SHARC constants CB and debug output image, then dispatches the SHARC Update raygen pass (sparse, 1/downscaleFactor² pixels) followed by the SHARC Query raygen pass (full-res) using the selected neeCache×SHARC permutation.*
+- **Inline tweak** at `DxvkPathtracerIntegrateIndirect::dispatch` (SHARC dispatch block) — SHARC Stage 3 + active-list resolve.
+  *When `IntegrateIndirectMode::SHARC` is active: binds the SHARC cache buffers, active-list buffers, constants CB, and debug output image, then dispatches Update → Resolve → Query. Update appends touched cache indices; Resolve normally consumes that compact active list and periodically falls back to a full table resolve.*
 
 - **Inline tweak** at `DxvkPathtracerIntegrateIndirect::dispatch` (`sharcEnabled` gate) — 2-line update (SHARC raytrace-mode routing fix).
   *Removes the requirement that `renderPassIntegrateIndirectRaytraceMode()` already be `RayQueryRayGen`; SHARC now routes through its RayQuery (RGS) Update/Query pipelines internally for every generic indirect raytrace-mode selection.*
