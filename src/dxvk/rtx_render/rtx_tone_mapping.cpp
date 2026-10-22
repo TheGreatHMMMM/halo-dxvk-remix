@@ -20,6 +20,7 @@
 * DEALINGS IN THE SOFTWARE.
 */
 #include "rtx_tone_mapping.h"
+#include "rtx_alt_tone_mapping.h"
 #include "rtx_dlss_neural_rendering.h"
 #include "dxvk_device.h"
 #include "dxvk_scoped_annotation.h"
@@ -112,6 +113,15 @@ namespace dxvk {
   }
 
   DxvkToneMapping::~DxvkToneMapping()  {  }
+
+  void DxvkToneMapping::setCurveArgs(FastToneMappingArgs& pushArgs) const {
+    // The DLSS-NR passes shape the image with the curve and exposure of the selected tonemapper.
+    const bool useAltCurve = DxvkAltToneMapping::isActive();
+    pushArgs.exposureFactor = useAltCurve
+      ? DxvkAltToneMapping::exposureFactor()
+      : exp2f(exposureBias() + RtxOptions::calcUserEVBias()); // ev100
+    pushArgs.useAltCurve = useAltCurve;
+  }
 
   void DxvkToneMapping::prewarmShaders(DxvkPipelineManager& pipelineManager) const {
     const auto& dlssNeuralRendering = m_device->getCommon()->metaDlssNeuralRendering();
@@ -355,7 +365,7 @@ namespace dxvk {
     // Prepare shader arguments
     FastToneMappingArgs pushArgs = {};
     pushArgs.enableAutoExposure = autoExposureEnabled;
-    pushArgs.exposureFactor = exp2f(exposureBias() + RtxOptions::calcUserEVBias()); // ev100
+    setCurveArgs(pushArgs);
 
     const Resources::Resource& inputColorTexture = rtOutput.m_finalOutput.resource(Resources::AccessType::Read);
     const VkExtent3D workgroups = util::computeBlockCount(inputColorTexture.view->imageInfo().extent, VkExtent3D { 16 , 16, 1 });
@@ -379,7 +389,7 @@ namespace dxvk {
     // Prepare shader arguments
     FastToneMappingArgs pushArgs = {};
     pushArgs.enableAutoExposure = autoExposureEnabled;
-    pushArgs.exposureFactor = exp2f(exposureBias() + RtxOptions::calcUserEVBias()); // ev100
+    setCurveArgs(pushArgs);
     // Highlight recovery (inverse-tonemap only path)
     pushArgs.enableHighlightRecovery = DlssNeuralRendering::enableHighlightRecovery() ? 1u : 0u;
     {

@@ -48,6 +48,9 @@
 #include "rtx_render/rtx_auto_exposure.h"
 #include "rtx_render/rtx_tone_mapping.h"
 #include "rtx_render/rtx_local_tone_mapping.h"
+// NV-DXVK start: alt tonemapper
+#include "rtx_render/rtx_alt_tone_mapping.h"
+// NV-DXVK end
 #include "rtx_render/rtx_bloom.h"
 #include "rtx_render/rtx_geometry_utils.h"
 #include "rtx_render/rtx_image_utils.h"
@@ -269,6 +272,12 @@ namespace dxvk {
       return m_localToneMapping.get();
     }
 
+    // NV-DXVK start: alt tonemapper
+    DxvkAltToneMapping& metaAltToneMapping() {
+      return m_altToneMapping.get();
+    }
+    // NV-DXVK end
+
     DxvkBloom& metaBloom() {
       return m_bloom.get();
     }
@@ -413,6 +422,9 @@ namespace dxvk {
     Active<DxvkAutoExposure>                m_autoExposure;
     Active<DxvkToneMapping>                 m_toneMapping;
     Active<DxvkLocalToneMapping>            m_localToneMapping;
+    // NV-DXVK start: alt tonemapper
+    Active<DxvkAltToneMapping>              m_altToneMapping;
+    // NV-DXVK end
     Active<DxvkBloom>                       m_bloom;
     Active<RtxGeometryUtils>                m_geometryUtils;
     Active<RtxImageUtils>                   m_imageUtils;

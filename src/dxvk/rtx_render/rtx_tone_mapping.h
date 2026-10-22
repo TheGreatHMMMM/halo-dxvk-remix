@@ -29,6 +29,7 @@
 #include "../spirv/spirv_code_buffer.h"
 #include "../util/util_matrix.h"
 #include "rtx_options.h"
+#include "rtx/pass/tonemap/tonemapping.h"
 
 namespace dxvk {
 
@@ -69,6 +70,8 @@ namespace dxvk {
 
   private:
     void createResources(Rc<RtxContext> ctx);
+
+    void setCurveArgs(FastToneMappingArgs& pushArgs) const;
 
     void dispatchHistogram(
       Rc<RtxContext> ctx,

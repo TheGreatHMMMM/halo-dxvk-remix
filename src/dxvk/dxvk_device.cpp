@@ -565,6 +565,9 @@ namespace dxvk {
     m_autoExposure(device),
     m_toneMapping(device),
     m_localToneMapping(device),
+    // NV-DXVK start: alt tonemapper
+    m_altToneMapping(device),
+    // NV-DXVK end
     m_bloom(device),
     m_geometryUtils(device),
     m_imageUtils(device),

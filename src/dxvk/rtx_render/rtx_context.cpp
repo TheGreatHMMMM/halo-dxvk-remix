@@ -1962,6 +1962,12 @@ namespace dxvk {
         GlobalTime::get().deltaTimeMs(),
         autoExposure.enabled());
     }
+    if (DxvkAltToneMapping::isActive()) {
+      m_common->metaAltToneMapping().dispatch(this,
+        autoExposure.getExposureTexture().view,
+        rtOutput,
+        autoExposure.enabled());
+    }
   }
 
   void RtxContext::dispatchBloom(const Resources::RaytracingOutput& rtOutput) {

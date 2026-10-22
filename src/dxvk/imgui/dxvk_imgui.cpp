@@ -4375,14 +4375,19 @@ namespace dxvk {
 
       if (RemixGui::CollapsingHeader("Tonemapping", collapsingHeaderClosedFlags))
       {
+        // User Brightness does not affect the alt tonemapper.
+        ImGui::BeginDisabled(DxvkAltToneMapping::isActive());
         RemixGui::SliderInt("User Brightness", &RtxOptions::userBrightnessObject(), 0, 100, "%d");
         RemixGui::DragFloat("User Brightness EV Range", &RtxOptions::userBrightnessEVRangeObject(), 0.5f, 0.f, 10.f, "%.1f");
+        ImGui::EndDisabled();
         RemixGui::Separator();
-        RemixGui::Combo("Tonemapping Mode", &RtxOptions::tonemappingModeObject(), "Global\0Local\0");
+        RemixGui::Combo("Tonemapping Mode", &RtxOptions::tonemappingModeObject(), "Global\0Local\0Alt\0");
         if (RtxOptions::tonemappingMode() == TonemappingMode::Global) {
           common->metaToneMapping().showImguiSettings();
-        } else {
+        } else if (RtxOptions::tonemappingMode() == TonemappingMode::Local) {
           common->metaLocalToneMapping().showImguiSettings();
+        } else {
+          common->metaAltToneMapping().showImguiSettings();
         }
         if (RtxOptions::showLegacyACESOption()) {
           RemixGui::Separator();
